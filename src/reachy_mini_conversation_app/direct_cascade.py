@@ -39,7 +39,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
-from reachy_mini_conversation_app.audio.pcm import resample
+from reachy_mini_conversation_app.audio.pcm import StreamingResampler, resample
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, to_mono, audio_to_int16
 from reachy_mini_conversation_app.voice_activity import SpeechSegmenter
 from reachy_mini_conversation_app.speech_services import (
@@ -422,40 +422,49 @@ class DirectCascadeHandler(ConversationHandler):
     # ---- speaker side ----
 
     async def _speech_loop(self) -> None:
-        """Synthesize queued sentences and stream them to the player, one at a time."""
+        """Speak queued sentences one at a time, starting each as it is synthesized."""
         while True:
             sentence, voice = await self._speech_queue.get()
             services = self._services
             if services is None:
                 continue
             try:
-                pcm = await services.text_to_speech.synthesize(sentence, voice)
+                await self._speak(services, sentence, voice)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.error("Speech synthesis failed: %s", e)
-                continue
-            await self._play(resample(pcm, services.text_to_speech.sample_rate, self.SAMPLE_RATE))
 
-    async def _play(self, pcm: NDArray[np.int16]) -> None:
-        """Queue one sentence of audio and pace production to real time."""
-        if pcm.size == 0:
-            return
+    async def _speak(self, services: SpeechServices, sentence: str, voice: str) -> None:
+        """Stream one sentence to the player, then wait out the audio already queued."""
+        resampler = StreamingResampler(services.text_to_speech.sample_rate, self.SAMPLE_RATE)
         self._set_speaking(True)
+        spoken = False
+        async for block in services.text_to_speech.stream(sentence, voice):
+            spoken = await self._queue_audio(resampler.process(block)) or spoken
+        if not spoken:
+            return
+
+        remaining = self._playback_ends_at - time.monotonic()
+        if not self._speech_queue.empty():
+            # Stay a little ahead of the speaker while more sentences are waiting.
+            await asyncio.sleep(max(0.0, remaining - _PLAYBACK_LEAD_S))
+            return
+        await asyncio.sleep(max(0.0, remaining) + _SPEAKING_TAIL_S)
+        if self._speech_queue.empty():
+            self._set_speaking(False)
+
+    async def _queue_audio(self, pcm: NDArray[np.int16]) -> bool:
+        """Hand one block of audio to the player and extend the expected playback end."""
+        if pcm.size == 0:
+            return False
         for start in range(0, pcm.size, _PLAYBACK_CHUNK_SAMPLES):
             self._mark_activity("assistant_audio_delta")
             await self.output_queue.put(
                 (self.SAMPLE_RATE, pcm[start : start + _PLAYBACK_CHUNK_SAMPLES].reshape(1, -1))
             )
-
-        now = time.monotonic()
-        self._playback_ends_at = max(self._playback_ends_at, now) + pcm.size / self.SAMPLE_RATE
-        if self._speech_queue.empty():
-            await asyncio.sleep(max(0.0, self._playback_ends_at - time.monotonic()) + _SPEAKING_TAIL_S)
-            if self._speech_queue.empty():
-                self._set_speaking(False)
-            return
-        await asyncio.sleep(max(0.0, self._playback_ends_at - time.monotonic() - _PLAYBACK_LEAD_S))
+        self._playback_ends_at = max(self._playback_ends_at, time.monotonic()) + pcm.size / self.SAMPLE_RATE
+        return True
 
     def _set_speaking(self, speaking: bool) -> None:
         """Mirror playback state into head motion and the barge-in threshold."""

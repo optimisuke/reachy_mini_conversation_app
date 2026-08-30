@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from typing import Any
+from collections.abc import AsyncIterator
 
 import numpy as np
 import pytest
@@ -155,24 +156,43 @@ async def test_speech_to_text_uploads_a_wav_and_returns_the_transcript() -> None
     assert captured["file"][1].startswith(b"RIFF")
 
 
-@pytest.mark.asyncio
-async def test_text_to_speech_maps_the_catalog_voice_and_decodes_pcm() -> None:
-    """A catalog voice should reach the provider as one of its own voices."""
-    captured: dict[str, Any] = {}
-    pcm = np.array([1, -1, 2], dtype=np.int16)
+def _fake_speech_client(blocks: list[bytes], captured: dict[str, Any]) -> Any:
+    """Return a client whose speech endpoint streams ``blocks``."""
 
-    async def create(**kwargs: Any) -> SimpleNamespace:
+    class FakeStreamingResponse:
+        async def __aenter__(self) -> "FakeStreamingResponse":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def iter_bytes(self, chunk_size: int | None = None) -> AsyncIterator[bytes]:
+            for block in blocks:
+                yield block
+
+    def create(**kwargs: Any) -> FakeStreamingResponse:
         captured.update(kwargs)
+        return FakeStreamingResponse()
 
-        async def aread() -> bytes:
-            return pcm.tobytes()
+    streaming = SimpleNamespace(create=create)
+    return SimpleNamespace(
+        audio=SimpleNamespace(speech=SimpleNamespace(with_streaming_response=streaming)),
+    )
 
-        return SimpleNamespace(aread=aread)
 
-    client = SimpleNamespace(audio=SimpleNamespace(speech=SimpleNamespace(create=create)))
+@pytest.mark.asyncio
+async def test_text_to_speech_maps_the_catalog_voice_and_streams_pcm() -> None:
+    """A catalog voice reaches the provider as one of its own, and PCM arrives in blocks."""
+    captured: dict[str, Any] = {}
+    pcm = np.array([1, -1, 2, -2], dtype=np.int16)
+    raw = pcm.tobytes()
+    # Split mid-sample: the odd byte has to be carried into the next block.
+    client = _fake_speech_client([raw[:3], raw[3:]], captured)
     text_to_speech = OpenAICompatibleTextToSpeech(client, "tts", 24000, voice_override=None)
 
-    np.testing.assert_array_equal(await text_to_speech.synthesize("やあ", "Ono_Anna"), pcm)
+    blocks = [block async for block in text_to_speech.stream("やあ", "Ono_Anna")]
+
+    np.testing.assert_array_equal(np.concatenate(blocks), pcm)
     assert captured["voice"] == "nova"
     assert captured["response_format"] == "pcm"
 
@@ -181,19 +201,11 @@ async def test_text_to_speech_maps_the_catalog_voice_and_decodes_pcm() -> None:
 async def test_text_to_speech_override_wins_over_the_catalog() -> None:
     """A configured provider voice should bypass the catalog mapping."""
     captured: dict[str, Any] = {}
-
-    async def create(**kwargs: Any) -> SimpleNamespace:
-        captured.update(kwargs)
-
-        async def aread() -> bytes:
-            return b""
-
-        return SimpleNamespace(aread=aread)
-
-    client = SimpleNamespace(audio=SimpleNamespace(speech=SimpleNamespace(create=create)))
+    client = _fake_speech_client([b""], captured)
     text_to_speech = OpenAICompatibleTextToSpeech(client, "tts", 24000, voice_override="jf_alpha")
 
-    await text_to_speech.synthesize("やあ", "Ono_Anna")
+    async for _block in text_to_speech.stream("やあ", "Ono_Anna"):
+        pass
 
     assert captured["voice"] == "jf_alpha"
 

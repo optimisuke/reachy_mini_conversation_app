@@ -26,6 +26,9 @@ _NOISE_FLOOR_MIN: Final[float] = 1e-4
 _NOISE_FLOOR_MAX: Final[float] = 0.05
 _NOISE_FLOOR_FALL: Final[float] = 0.3
 _NOISE_FLOOR_RISE: Final[float] = 0.01
+# Enough tail for the last word not to sound clipped, without paying to upload
+# the silence the end-of-turn decision needed.
+_TRAILING_SILENCE_KEEP_S: Final[float] = 0.15
 
 
 @dataclass(frozen=True)
@@ -143,7 +146,11 @@ class SpeechSegmenter:
 
     def _close_utterance(self, *, relearn_noise_floor: bool = False) -> list[UtteranceEvent]:
         """End the current utterance, dropping it when it holds too little speech."""
-        utterance = np.concatenate(self._utterance) if self._utterance else np.zeros(0, dtype=np.int16)
+        windows = self._utterance
+        surplus_silence = self._silent_windows - self._windows_for(_TRAILING_SILENCE_KEEP_S)
+        if surplus_silence > 0:
+            windows = windows[:-surplus_silence]
+        utterance = np.concatenate(windows) if windows else np.zeros(0, dtype=np.int16)
         voiced_s = self._voiced_in_speech * self._settings.window_s
         self.reset()
 

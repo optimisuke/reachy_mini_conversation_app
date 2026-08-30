@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _STT_TIMEOUT_S: Final[float] = 30.0
 _LLM_TIMEOUT_S: Final[float] = 60.0
 _TTS_TIMEOUT_S: Final[float] = 30.0
+# Roughly 170 ms of 24 kHz audio: small enough to start playback early, large
+# enough that the resampler is not called per handful of samples.
+_TTS_CHUNK_BYTES: Final[int] = 8192
 
 # The voice catalog the UI and profiles use comes from the deployed Hugging Face
 # backend's Qwen3-TTS speakers, so map it onto the provider's own voices. Set
@@ -85,8 +88,8 @@ class TextToSpeech(Protocol):
 
     sample_rate: int
 
-    async def synthesize(self, text: str, voice: str) -> NDArray[np.int16]:
-        """Return spoken ``text`` for the catalog voice ``voice``."""
+    def stream(self, text: str, voice: str) -> AsyncIterator[NDArray[np.int16]]:
+        """Yield PCM for ``text`` as it is synthesized, in the catalog voice ``voice``."""
         ...
 
 
@@ -211,15 +214,24 @@ class OpenAICompatibleTextToSpeech:
         self.sample_rate = sample_rate
         self._voice_override = voice_override
 
-    async def synthesize(self, text: str, voice: str) -> NDArray[np.int16]:
-        """Return raw PCM for ``text`` spoken with the mapped provider voice."""
-        response = await self._client.audio.speech.create(
+    async def stream(self, text: str, voice: str) -> AsyncIterator[NDArray[np.int16]]:
+        """Yield PCM as the provider produces it, so playback need not wait for the whole sentence."""
+        partial_sample = b""
+        async with self._client.audio.speech.with_streaming_response.create(
             model=self._model,
             voice=self._voice_override or _OPENAI_VOICE_BY_CATALOG_NAME.get(voice, _DEFAULT_PROVIDER_VOICE),
             input=text,
             response_format="pcm",
-        )
-        return decode_pcm(await response.aread())
+        ) as response:
+            async for block in response.iter_bytes(chunk_size=_TTS_CHUNK_BYTES):
+                if not block:
+                    continue
+                # A block can split a sample in half; carry the odd byte over.
+                partial_sample += block
+                whole_samples = len(partial_sample) - len(partial_sample) % 2
+                if whole_samples:
+                    yield decode_pcm(partial_sample[:whole_samples])
+                    partial_sample = partial_sample[whole_samples:]
 
 
 class OpenAICompatibleChatModel:

@@ -40,16 +40,17 @@ class _FakeSpeechToText:
 
 
 class _FakeTextToSpeech:
-    """Records what it was asked to say and returns 100 ms of audio."""
+    """Records what it was asked to say and streams 100 ms of audio in two blocks."""
 
     sample_rate = SAMPLE_RATE
 
     def __init__(self) -> None:
         self.spoken: list[tuple[str, str]] = []
 
-    async def synthesize(self, text: str, voice: str) -> np.ndarray:
+    async def stream(self, text: str, voice: str) -> AsyncIterator[np.ndarray]:
         self.spoken.append((text, voice))
-        return np.zeros(SAMPLE_RATE // 10, dtype=np.int16)
+        for _ in range(2):
+            yield np.zeros(SAMPLE_RATE // 20, dtype=np.int16)
 
 
 class _FakeChatModel:
