@@ -36,6 +36,16 @@ async def wait_for_item(queue: asyncio.Queue[QueueItem], timeout: float = 0.1) -
         return None
 
 
+def to_mono(audio: AudioArray) -> AudioArray:
+    """Collapse a possibly 2-D, multi-channel frame into a 1-D mono frame."""
+    if audio.ndim != 2:
+        return audio
+    # channels-last convention
+    if audio.shape[1] > audio.shape[0]:
+        audio = audio.T
+    return audio[:, 0]
+
+
 def audio_to_int16(audio: AudioArray) -> NDArray[np.int16]:
     """Convert int16 or float32 audio data to int16 samples."""
     if audio.dtype == np.int16:
