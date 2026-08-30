@@ -173,6 +173,8 @@ DIRECT_TTS_VOICE=jf_alpha
 DIRECT_TTS_SAMPLE_RATE=24000
 ```
 
+The `camera` tool returns a picture, not a description, so set `DIRECT_LLM_VISION=1` when the language model can read images; with it off Reachy says it cannot see rather than inventing an answer.
+
 See `.env.example` for the full list, including the `DIRECT_VAD_*` thresholds that tune when speech starts, when a turn ends, and how loud an interruption must be while Reachy is talking.
 
 ## Running the app

@@ -14,6 +14,7 @@ import reachy_mini_conversation_app.direct_cascade as direct_mod
 from reachy_mini_conversation_app.tools import background_tool_manager
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.direct_cascade import DirectCascadeHandler
+from reachy_mini_conversation_app.voice_activity import UtteranceEvent
 from reachy_mini_conversation_app.speech_services import (
     ChatEvent,
     TextDelta,
@@ -231,6 +232,9 @@ async def test_tool_result_feeds_a_second_response(monkeypatch: Any) -> None:
     # The bulky image payload must not be echoed back into the history.
     assert "b64_im" not in tool_messages[0]["content"]
     assert "image_attached" in tool_messages[0]["content"]
+    # Without a vision model the picture cannot be shown, so say so instead of guessing.
+    assert "cannot see images" in tool_messages[0]["content"]
+    assert not any(isinstance(message.get("content"), list) for message in chat_model.seen_messages[-1])
     assert text_to_speech.spoken == [("撮ったよ。", PROFILE_VOICE)]
 
 
@@ -379,10 +383,37 @@ async def test_noise_while_thinking_does_not_drop_the_answer(monkeypatch: Any) -
         handler._turn_task = asyncio.create_task(asyncio.sleep(5), name="pretend-turn")
         turn = handler._turn_task
 
-        await handler._on_speech_started()
+        await handler._on_speech_started(UtteranceEvent(speech_started=True))
 
         assert handler._turn_task is turn
         assert not turn.cancelled()
         assert flushes == []
         turn.cancel()
         handler._turn_task = None
+
+
+@pytest.mark.asyncio
+async def test_a_vision_model_is_shown_the_camera_image(monkeypatch: Any) -> None:
+    """With vision enabled the picture itself reaches the model, not a claim about it."""
+    monkeypatch.setattr(background_tool_manager, "dispatch_tool_call", AsyncMock(return_value={"b64_im": "SkZJRg=="}))
+    handler, _stt, chat_model, text_to_speech = _make_handler(
+        monkeypatch,
+        transcripts=["何が見える？"],
+        rounds=[
+            [ToolCallRequest(call_id="call-1", name="camera", arguments="{}")],
+            [TextDelta("机が見えるよ。")],
+        ],
+    )
+
+    async with _running(handler):
+        handler._llm_vision = True
+        await _say_something(handler)
+        await _wait_for(lambda: bool(text_to_speech.spoken))
+
+    image_parts = [
+        part
+        for message in chat_model.seen_messages[-1]
+        if isinstance(message.get("content"), list)
+        for part in message["content"]
+    ]
+    assert image_parts == [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,SkZJRg=="}}]

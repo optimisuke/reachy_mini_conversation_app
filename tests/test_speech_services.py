@@ -35,6 +35,7 @@ def _settings(**overrides: Any) -> DirectBackendSettings:
         "tts_api_key": "key",
         "tts_sample_rate": 24000,
         "tts_voice": None,
+        "llm_vision": False,
     }
     values.update(overrides)
     return DirectBackendSettings(**values)

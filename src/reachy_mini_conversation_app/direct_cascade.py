@@ -11,6 +11,7 @@ import time
 import asyncio
 import logging
 from typing import Any, Final
+from dataclasses import dataclass
 from collections.abc import Coroutine
 
 import numpy as np
@@ -41,7 +42,7 @@ from reachy_mini_conversation_app.prompts import (
 )
 from reachy_mini_conversation_app.audio.pcm import StreamingResampler, resample
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, to_mono, audio_to_int16
-from reachy_mini_conversation_app.voice_activity import SpeechSegmenter
+from reachy_mini_conversation_app.voice_activity import UtteranceEvent, SpeechSegmenter
 from reachy_mini_conversation_app.speech_services import (
     TextDelta,
     SentenceBuffer,
@@ -60,6 +61,9 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
 
 logger = logging.getLogger(__name__)
 
+_CAMERA_IMAGE_UNAVAILABLE: Final[str] = (
+    "The camera took a picture, but this model cannot see images. Say you cannot see it; never guess."
+)
 _MAX_TOOL_ROUNDS: Final[int] = 4
 _TOOL_RESULT_TIMEOUT_S: Final[float] = 30.0
 _MAX_HISTORY_MESSAGES: Final[int] = 40
@@ -69,6 +73,14 @@ _PLAYBACK_CHUNK_SAMPLES: Final[int] = 640  # 40 ms at 16 kHz
 _PLAYBACK_LEAD_S: Final[float] = 0.2
 # The speaker drains and the room rings after the last frame leaves the queue.
 _SPEAKING_TAIL_S: Final[float] = 0.4
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    """What one finished tool gives the model: its output, plus any captured image."""
+
+    payload: dict[str, Any]
+    image_b64: str | None
 
 
 class DirectCascadeHandler(ConversationHandler):
@@ -99,7 +111,8 @@ class DirectCascadeHandler(ConversationHandler):
         self._turn_task: asyncio.Task[None] | None = None
         self._speech_task: asyncio.Task[None] | None = None
         self._speech_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-        self._pending_tool_results: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._pending_tool_results: dict[str, asyncio.Future[ToolOutcome]] = {}
+        self._llm_vision = False
         self._assistant_speaking = False
         self._playback_ends_at = 0.0
         self._turn_user_done_at: float | None = None
@@ -115,6 +128,7 @@ class DirectCascadeHandler(ConversationHandler):
     async def start_up(self) -> None:
         """Build the speech stages and serve the session until shutdown."""
         settings = get_direct_backend_settings()
+        self._llm_vision = settings.llm_vision
         self._services = build_speech_services(settings)
         self._segmenter = SpeechSegmenter(self.SAMPLE_RATE, get_speech_detection_settings())
         self._reset_conversation()
@@ -123,12 +137,13 @@ class DirectCascadeHandler(ConversationHandler):
         self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
         self._speech_task = asyncio.create_task(self._speech_loop(), name="direct-speech")
         logger.info(
-            "Direct backend ready: stt=%s llm=%s tts=%s language=%r voice=%r",
+            "Direct backend ready: stt=%s llm=%s tts=%s language=%r voice=%r vision=%s",
             settings.stt_model,
             settings.llm_model,
             settings.tts_model,
             settings.stt_language,
             self.get_current_voice(),
+            settings.llm_vision,
         )
         try:
             await self._send_startup_greeting()
@@ -180,16 +195,21 @@ class DirectCascadeHandler(ConversationHandler):
 
         for event in self._segmenter.push(samples):
             if event.speech_started:
-                await self._on_speech_started()
+                await self._on_speech_started(event)
             if event.utterance is not None:
                 await self._on_utterance(event.utterance)
 
-    async def _on_speech_started(self) -> None:
+    async def _on_speech_started(self, event: UtteranceEvent) -> None:
         """Mark the user as talking, interrupting Reachy when it is mid-answer."""
         self._mark_activity("user_speech_started")
         self.deps.movement_manager.set_listening(True)
         if self._assistant_speaking:
-            logger.info("User barge-in: dropping the response being spoken")
+            # The levels tell a real interruption from Reachy's own voice leaking in.
+            logger.info(
+                "User barge-in: dropping the response being spoken (level=%.4f threshold=%.4f)",
+                event.level,
+                event.threshold,
+            )
             await self._cancel_active_turn()
             await self._stop_speaking()
 
@@ -315,14 +335,14 @@ class DirectCascadeHandler(ConversationHandler):
     async def _run_tool_calls(self, text: str, tool_calls: list[ToolCallRequest]) -> None:
         """Run every requested tool, then record the request and its replies together."""
         loop = asyncio.get_running_loop()
-        results: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        results: dict[str, asyncio.Future[ToolOutcome]] = {}
         try:
             for call in tool_calls:
                 self._mark_activity("tool_call_received")
                 logger.info(
                     "Tool call received — tool_name=%r, call_id=%s, args=%s", call.name, call.call_id, call.arguments
                 )
-                future: asyncio.Future[dict[str, Any]] = loop.create_future()
+                future: asyncio.Future[ToolOutcome] = loop.create_future()
                 self._pending_tool_results[call.call_id] = future
                 results[call.call_id] = future
                 background_tool = await self.tool_manager.start_tool(
@@ -354,13 +374,34 @@ class DirectCascadeHandler(ConversationHandler):
             # No await between these appends: the model rejects a tool request
             # whose replies are missing, so the pair has to be uninterruptible.
             self._messages.append(self._assistant_message(text, tool_calls))
+            images: list[str] = []
             for call_id, future in results.items():
-                output = future.result() if future.done() else {"error": "tool did not finish in time"}
+                outcome = (
+                    future.result() if future.done() else ToolOutcome({"error": "tool did not finish in time"}, None)
+                )
+                payload = dict(outcome.payload)
+                if outcome.image_b64 is not None:
+                    if self._llm_vision:
+                        images.append(outcome.image_b64)
+                    else:
+                        payload["note"] = _CAMERA_IMAGE_UNAVAILABLE
                 self._messages.append(
                     ChatCompletionToolMessageParam(
                         role="tool",
                         tool_call_id=call_id,
-                        content=json.dumps(output, ensure_ascii=False),
+                        content=json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
+            for image_b64 in images:
+                self._messages.append(
+                    ChatCompletionUserMessageParam(
+                        role="user",
+                        content=[
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                            },
+                        ],
                     ),
                 )
         finally:
@@ -393,7 +434,8 @@ class DirectCascadeHandler(ConversationHandler):
 
         future = self._pending_tool_results.get(completed_tool.id)
         if future is not None and not future.done():
-            future.set_result(output)
+            image_b64 = completed_tool.result.get("b64_im") if isinstance(completed_tool.result, dict) else None
+            future.set_result(ToolOutcome(output, image_b64 if isinstance(image_b64, str) else None))
 
     def _trim_history(self) -> None:
         """Bound the history, keeping the system message and whole recent turns."""

@@ -37,6 +37,8 @@ class UtteranceEvent:
 
     speech_started: bool = False
     utterance: NDArray[np.int16] | None = None
+    level: float = 0.0
+    threshold: float = 0.0
 
 
 def _rms(samples: NDArray[np.int16]) -> float:
@@ -109,7 +111,8 @@ class SpeechSegmenter:
         """Classify one analysis window and advance the speech state machine."""
         min_level, ratio, onset_s = self._trigger()
         level = _rms(window)
-        voiced = level > max(min_level, self._noise_floor * ratio)
+        threshold = max(min_level, self._noise_floor * ratio)
+        voiced = level > threshold
 
         if not self._in_speech:
             self._preroll.append(window)
@@ -128,7 +131,7 @@ class SpeechSegmenter:
             self._silent_windows = 0
             self._utterance = list(self._preroll)
             self._preroll.clear()
-            return [UtteranceEvent(speech_started=True)]
+            return [UtteranceEvent(speech_started=True, level=level, threshold=threshold)]
 
         self._utterance.append(window)
         if voiced:

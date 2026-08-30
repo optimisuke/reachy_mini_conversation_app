@@ -105,3 +105,14 @@ def test_language_model_key_falls_back_across_providers(monkeypatch) -> None:
     config.refresh_runtime_config_from_env()
 
     assert config.get_direct_backend_settings().llm_api_key == "hf-token"
+
+
+def test_vision_is_off_unless_asked_for(monkeypatch) -> None:
+    """The default language model reads text only, so images are opt-in."""
+    monkeypatch.delenv("DIRECT_LLM_VISION", raising=False)
+
+    assert config.get_direct_backend_settings().llm_vision is False
+
+    monkeypatch.setenv("DIRECT_LLM_VISION", "1")
+
+    assert config.get_direct_backend_settings().llm_vision is True

@@ -548,6 +548,7 @@ class DirectBackendSettings:
     tts_api_key: str
     tts_sample_rate: int
     tts_voice: str | None
+    llm_vision: bool
 
 
 def get_direct_backend_settings() -> DirectBackendSettings:
@@ -568,6 +569,8 @@ def get_direct_backend_settings() -> DirectBackendSettings:
         tts_api_key=_env_text("DIRECT_TTS_API_KEY", openai_api_key),
         tts_sample_rate=_env_int("DIRECT_TTS_SAMPLE_RATE", DIRECT_DEFAULTS.tts_sample_rate),
         tts_voice=_optional_env_text("DIRECT_TTS_VOICE"),
+        # Off by default because the default endpoint's model reads text only.
+        llm_vision=_env_flag("DIRECT_LLM_VISION", default=False),
     )
 
 
