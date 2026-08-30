@@ -151,7 +151,6 @@ class OpenAIRealtimeHandler(HuggingFaceRealtimeHandler):
 
     def _get_session_config(self, tool_specs: list[ToolSpec]) -> RealtimeSessionCreateRequestParam:
         """Return the session config, with the server's turn detection switched off."""
-        settings = get_direct_backend_settings()
         return RealtimeSessionCreateRequestParam(
             type="realtime",
             instructions=get_session_instructions(self.instance_path),
