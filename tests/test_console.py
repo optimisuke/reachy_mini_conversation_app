@@ -190,6 +190,7 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     handler = MagicMock()
     handler.shutdown = AsyncMock()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    handler._is_connected.return_value = False
     stream = LocalStream(
         handler,
         robot,
@@ -372,7 +373,7 @@ def test_status_reports_backend_connection_failure(
 
     app = FastAPI()
     handler = MagicMock()
-    handler.connection = None
+    handler._is_connected.return_value = False
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
     stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
@@ -398,7 +399,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
 
     app = FastAPI()
     handler = MagicMock()
-    handler.connection = None
+    handler._is_connected.return_value = False
     handler.shutdown = AsyncMock()
     media = SimpleNamespace(
         audio=None,
@@ -483,6 +484,9 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
             self.started = asyncio.Event()
             self.stopped = asyncio.Event()
             self.shutdown_calls = 0
+
+        def _is_connected(self) -> bool:
+            return self.connection is not None
 
         async def start_up(self) -> None:
             self.connection = object()

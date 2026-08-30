@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import ClassVar, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 from collections.abc import Callable
 
 import numpy as np
@@ -49,6 +49,16 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_transcript_observer(self, observer: Callable[[str, str, bool], None] | None) -> None:
         """Attach/detach a transcript observer, called (role, text, final)."""
         self._transcript_observer = observer
+
+    @staticmethod
+    def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
+        """Remove bulky transport-only fields before echoing tool output back to the model."""
+        if tool_name == "camera" and "b64_im" in tool_result:
+            sanitized = dict(tool_result)
+            sanitized.pop("b64_im", None)
+            sanitized["image_attached"] = True
+            return sanitized
+        return tool_result
 
     def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
         """Forward one transcript chunk to the observer, if attached."""

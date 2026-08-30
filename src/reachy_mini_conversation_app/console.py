@@ -38,7 +38,7 @@ from reachy_mini_conversation_app.config import (
     refresh_runtime_config_from_env,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, to_mono, audio_to_float32
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
@@ -255,12 +255,12 @@ class LocalStream:
             return []
 
     def _backend_connected(self) -> bool:
-        """Return whether the active handler currently has a realtime connection."""
+        """Return whether the active handler currently has an open backend session."""
         try:
-            handler_state = vars(self.handler)
-        except TypeError:
-            handler_state = {}
-        return handler_state.get("connection") is not None
+            return bool(self.handler._is_connected())
+        except Exception as e:
+            logger.debug("Handler connection state unavailable: %s", e)
+            return False
 
     def _can_rebuild_handler(self) -> bool:
         """Return whether LocalStream can construct handlers for backend changes."""
@@ -909,17 +909,7 @@ class LocalStream:
                 if audio_data.size == 0:
                     continue
 
-                # Reshape if needed
-                if audio_data.ndim == 2:
-                    # channels-last convention
-                    if audio_data.shape[1] > audio_data.shape[0]:
-                        audio_data = audio_data.T
-                    # Multiple channels -> Mono channel
-                    if audio_data.shape[1] > 1:
-                        audio_data = audio_data[:, 0]
-
-                # Cast if needed
-                audio_frame = audio_to_float32(audio_data)
+                audio_frame = audio_to_float32(to_mono(audio_data))
 
                 self._robot.media.push_audio_sample(audio_frame)
                 self._emit_level("assistant", audio_frame)

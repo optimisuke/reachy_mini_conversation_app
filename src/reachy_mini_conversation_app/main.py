@@ -87,8 +87,10 @@ def run(
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
+        DIRECT_BACKEND,
         HF_LOCAL_CONNECTION_MODE,
         set_instance_path,
+        get_conversation_backend,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
@@ -120,10 +122,13 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
-    logger.info(
-        "Configured Hugging Face realtime backend, connection mode: %s",
-        get_hf_connection_selection().mode,
-    )
+    if get_conversation_backend() == DIRECT_BACKEND:
+        logger.info("Configured direct conversation backend: local VAD with HTTP speech and language APIs")
+    else:
+        logger.info(
+            "Configured Hugging Face realtime backend, connection mode: %s",
+            get_hf_connection_selection().mode,
+        )
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -165,7 +170,17 @@ def run(
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
-        """Build a Hugging Face realtime handler for the current runtime config."""
+        """Build the handler for the currently selected conversation backend."""
+        if get_conversation_backend() == DIRECT_BACKEND:
+            from reachy_mini_conversation_app.direct_cascade import DirectCascadeHandler
+
+            logger.info("Using direct conversation handler (local VAD, then STT, LLM and TTS)")
+            return DirectCascadeHandler(
+                deps,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+
         from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
         hf_connection_selection = get_hf_connection_selection()

@@ -5,6 +5,7 @@ import pytest
 
 from reachy_mini_conversation_app.streaming import (
     AdditionalOutputs,
+    to_mono,
     wait_for_item,
     audio_to_int16,
     audio_to_float32,
@@ -48,3 +49,24 @@ def test_audio_converters_reject_unsupported_dtype() -> None:
 
     with pytest.raises(TypeError, match="Unsupported audio data type"):
         audio_to_int16(audio)
+
+
+def test_to_mono_keeps_one_dimensional_audio() -> None:
+    """Already mono frames should pass through untouched."""
+    audio = np.array([1, 2, 3], dtype=np.int16)
+
+    np.testing.assert_array_equal(to_mono(audio), audio)
+
+
+def test_to_mono_takes_the_first_channel() -> None:
+    """Multi-channel frames should collapse to the first channel."""
+    audio = np.array([[1, 9], [2, 9], [3, 9]], dtype=np.int16)
+
+    np.testing.assert_array_equal(to_mono(audio), np.array([1, 2, 3], dtype=np.int16))
+
+
+def test_to_mono_transposes_channels_first_audio() -> None:
+    """Channels-first frames should be transposed before the channel is picked."""
+    audio = np.array([[1, 2, 3, 4], [9, 9, 9, 9]], dtype=np.int16)
+
+    np.testing.assert_array_equal(to_mono(audio), np.array([1, 2, 3, 4], dtype=np.int16))

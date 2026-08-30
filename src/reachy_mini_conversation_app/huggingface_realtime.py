@@ -35,6 +35,7 @@ from reachy_mini_conversation_app.config import (
     get_available_voices,
     get_hf_direct_ws_url,
     parse_hf_realtime_url,
+    resolve_available_voice,
     get_hf_connection_selection,
 )
 from reachy_mini_conversation_app.prompts import (
@@ -42,7 +43,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
-from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, to_mono, audio_to_int16
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
@@ -135,7 +136,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.instance_path = instance_path
-        self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
+        self._voice_override: str | None = resolve_available_voice(startup_voice, source="persisted startup voice")
         self._realtime_connect_query: dict[str, str] = {}
 
         # Debouncing for partial transcripts
@@ -164,20 +165,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
 
-    @staticmethod
-    def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
-        """Remove bulky transport-only fields before echoing tool output back to the model."""
-        if tool_name == "camera" and "b64_im" in tool_result:
-            sanitized = dict(tool_result)
-            sanitized.pop("b64_im", None)
-            sanitized["image_attached"] = True
-            return sanitized
-        return tool_result
-
-    def _normalize_startup_voice(self, voice: str | None) -> str | None:
-        """Return a valid persisted startup voice, or None."""
-        return self._resolve_backend_voice(voice, source="persisted startup voice")
-
     async def _wait_for_response_done_before_tool_result(self) -> bool:
         """Return whether the function-call response finished before sending tool output."""
         if self._response_done_event.is_set():
@@ -191,33 +178,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             return True
         except asyncio.TimeoutError:
             return False
-
-    def _resolve_backend_voice(
-        self,
-        voice: str | None,
-        *,
-        source: str,
-        fallback: str | None = None,
-    ) -> str | None:
-        """Return a backend-supported voice, optionally falling back when unsupported."""
-        available_voices = get_available_voices()
-        voice_value = (voice or "").strip()
-        if not voice_value:
-            return fallback
-
-        voice_by_lowercase = {candidate.lower(): candidate for candidate in available_voices}
-        normalized_voice = voice_by_lowercase.get(voice_value.lower())
-        if normalized_voice is not None:
-            return normalized_voice
-
-        if voice:
-            logger.warning(
-                "Ignoring unsupported %s %r; expected one of %s",
-                source,
-                voice,
-                available_voices,
-            )
-        return fallback
 
     def _get_session_config(self, tool_specs: list[ToolSpec]) -> RealtimeSessionCreateRequestParam:
         """Return the Hugging Face OpenAI-compatible session config."""
@@ -264,7 +224,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """Change only the voice, updating the active session when possible."""
         default_voice = get_default_voice()
         resolved_voice = (
-            self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice) or default_voice
+            resolve_available_voice(voice, source="requested voice", fallback=default_voice) or default_voice
         )
         self._voice_override = resolved_voice
         if self.connection is not None:
@@ -289,7 +249,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """Return the voice currently selected for this handler."""
         default_voice = get_default_voice()
         voice = self._voice_override or get_session_voice(default=default_voice)
-        return self._resolve_backend_voice(voice, source="session voice", fallback=default_voice) or default_voice
+        return resolve_available_voice(voice, source="session voice", fallback=default_voice) or default_voice
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a personality to the active or next realtime connection."""
@@ -961,17 +921,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if audio_frame.size == 0:
             return
 
-        # Reshape if needed
-        if audio_frame.ndim == 2:
-            # channels-last convention
-            if audio_frame.shape[1] > audio_frame.shape[0]:
-                audio_frame = audio_frame.T
-            # Multiple channels -> Mono channel
-            if audio_frame.shape[1] > 1:
-                audio_frame = audio_frame[:, 0]
-
-        # Cast if needed
-        audio_frame = audio_to_int16(audio_frame)
+        audio_frame = audio_to_int16(to_mono(audio_frame))
 
         # Send to the realtime input buffer (guard against races during reconnect).
         try:

@@ -33,7 +33,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 
 ## Overview
 
-- Low-latency audio conversation through the Hugging Face realtime backend, using the built-in server or a local endpoint.
+- Low-latency audio conversation through the Hugging Face realtime backend, using the built-in server or a local endpoint, or through the direct backend that calls speech and language APIs itself (`CONVERSATION_BACKEND=direct`).
 - Vision is handled by the realtime backend when the `camera` tool is used.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble.
 - Async tools integrate motion, camera capture, and MCP Tool Spaces. The optional web UI (`--ui`) manages conversations, personalities, tools, and settings.
@@ -102,7 +102,8 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 
 | Variable | Description |
 |----------|-------------|
-| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
+| `REALTIME_TRANSCRIPTION_LANGUAGE` | Input transcription language. Defaults to `en`. The deployed realtime backend transcribes only the languages its server supports; the direct backend passes this to its own speech-to-text, so `ja` works there. |
+| `CONVERSATION_BACKEND` | Backend selector: `huggingface` for the realtime websocket backend, `direct` to run voice activity detection locally and call speech and language APIs directly. Defaults to `huggingface`. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
@@ -148,6 +149,33 @@ HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
 ```
 
 In the web UI's Settings view, the Connection section lets you choose either the built-in server or a local `host:port` target. The UI writes `HF_REALTIME_CONNECTION_MODE` for you, and the local path writes `HF_REALTIME_WS_URL` with a default of `localhost:8765`.
+
+### Direct backend
+
+The realtime backend is speech-to-speech: its server owns transcription, so a language its speech-to-text does not cover cannot be spoken to, whatever `REALTIME_TRANSCRIPTION_LANGUAGE` says. The direct backend answers that by detecting speech in the app and calling each stage itself — Japanese works because its speech-to-text does.
+
+```env
+CONVERSATION_BACKEND=direct
+OPENAI_API_KEY=sk-...
+HF_TOKEN=hf_...
+REALTIME_TRANSCRIPTION_LANGUAGE=ja
+REACHY_MINI_CUSTOM_PROFILE=default_ja
+```
+
+Defaults: OpenAI `gpt-transcribe` for speech-to-text, `Qwen/Qwen3-4B-Instruct-2507` through the Hugging Face router for the language model, and OpenAI `gpt-4o-mini-tts` for speech. The speech stages use `OPENAI_API_KEY` and the language model uses `HF_TOKEN`, each overridable per stage; a stage pointed at another provider falls back to whichever key is configured. Tools, personalities, memory, the web UI and the voice catalog all behave as they do on the realtime backend; voices are mapped onto the provider's own.
+
+Every stage speaks the OpenAI HTTP API, so each one can be pointed elsewhere — a local Kokoro speech server, for instance — without code changes:
+
+```env
+DIRECT_TTS_BASE_URL=http://127.0.0.1:8880/v1
+DIRECT_TTS_MODEL=kokoro
+DIRECT_TTS_VOICE=jf_alpha
+DIRECT_TTS_SAMPLE_RATE=24000
+```
+
+The `camera` tool returns a picture, not a description, so set `DIRECT_LLM_VISION=1` when the language model can read images; with it off Reachy says it cannot see rather than inventing an answer.
+
+See `.env.example` for the full list, including the `DIRECT_VAD_*` thresholds that tune when speech starts, when a turn ends, and how loud an interruption must be while Reachy is talking.
 
 ## Running the app
 

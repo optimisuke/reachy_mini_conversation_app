@@ -68,6 +68,13 @@ HF_LOCAL_CONNECTION_MODE = "local"
 HF_DEPLOYED_CONNECTION_MODE = "deployed"
 HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-url.hf.space/session"
 
+# Backend selector. The Hugging Face realtime backend stays the default; the direct
+# backend runs voice activity detection in the handler and calls STT, LLM and TTS
+# endpoints itself, which is how languages the deployed realtime STT cannot
+# transcribe (Japanese) become usable.
+CONVERSATION_BACKEND_ENV = "CONVERSATION_BACKEND"
+DIRECT_BACKEND = "direct"
+
 
 @dataclass(frozen=True)
 class HFBackendDefaults:
@@ -84,6 +91,21 @@ class HFBackendDefaults:
 
 
 HF_DEFAULTS = HFBackendDefaults()
+
+
+@dataclass(frozen=True)
+class DirectBackendDefaults:
+    """Defaults for the direct backend's speech and language endpoints."""
+
+    stt_model: str = "gpt-transcribe"
+    llm_model: str = "Qwen/Qwen3-4B-Instruct-2507"
+    llm_base_url: str = "https://router.huggingface.co/v1"
+    tts_model: str = "gpt-4o-mini-tts"
+    # OpenAI streams /v1/audio/speech PCM at 24 kHz; other providers need an override.
+    tts_sample_rate: int = 24000
+
+
+DIRECT_DEFAULTS = DirectBackendDefaults()
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +141,40 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
     logger.warning("Invalid boolean value for %s=%r, using default=%s", name, raw, default)
     return default
+
+
+def _env_text(name: str, default: str) -> str:
+    """Return a stripped, non-empty environment value, or ``default``."""
+    return (os.getenv(name) or "").strip() or default
+
+
+def _optional_env_text(name: str) -> str | None:
+    """Return a stripped environment value, or None when unset or empty."""
+    return (os.getenv(name) or "").strip() or None
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float environment value, falling back to ``default`` when invalid."""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using default=%s", name, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int environment value, falling back to ``default`` when invalid."""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid integer value for %s=%r, using default=%s", name, raw, default)
+        return default
 
 
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
@@ -441,6 +497,120 @@ def get_available_voices() -> list[str]:
 def get_default_voice() -> str:
     """Return the default Hugging Face voice."""
     return HF_DEFAULTS.voice
+
+
+def resolve_available_voice(voice: str | None, *, source: str, fallback: str | None = None) -> str | None:
+    """Return the catalog voice matching ``voice``, warning and falling back when unsupported."""
+    available_voices = get_available_voices()
+    voice_value = (voice or "").strip()
+    if not voice_value:
+        return fallback
+
+    voice_by_lowercase = {candidate.lower(): candidate for candidate in available_voices}
+    normalized_voice = voice_by_lowercase.get(voice_value.lower())
+    if normalized_voice is not None:
+        return normalized_voice
+
+    logger.warning("Ignoring unsupported %s %r; expected one of %s", source, voice, available_voices)
+    return fallback
+
+
+def get_conversation_backend() -> str:
+    """Return the selected conversation backend, defaulting to Hugging Face realtime."""
+    candidate = (os.getenv(CONVERSATION_BACKEND_ENV) or "").strip().lower()
+    if not candidate:
+        return HF_BACKEND
+    if candidate not in {HF_BACKEND, DIRECT_BACKEND}:
+        logger.warning(
+            "Invalid %s=%r. Expected %s or %s.",
+            CONVERSATION_BACKEND_ENV,
+            candidate,
+            HF_BACKEND,
+            DIRECT_BACKEND,
+        )
+        return HF_BACKEND
+    return candidate
+
+
+@dataclass(frozen=True)
+class DirectBackendSettings:
+    """Resolved endpoints, models and credentials for the direct backend."""
+
+    stt_model: str
+    stt_base_url: str | None
+    stt_api_key: str
+    stt_language: str
+    llm_model: str
+    llm_base_url: str
+    llm_api_key: str
+    tts_model: str
+    tts_base_url: str | None
+    tts_api_key: str
+    tts_sample_rate: int
+    tts_voice: str | None
+    llm_vision: bool
+
+
+def get_direct_backend_settings() -> DirectBackendSettings:
+    """Resolve the direct backend's endpoints, models and credentials from the environment."""
+    openai_api_key = _env_text("OPENAI_API_KEY", "")
+    return DirectBackendSettings(
+        stt_model=_env_text("DIRECT_STT_MODEL", DIRECT_DEFAULTS.stt_model),
+        stt_base_url=_optional_env_text("DIRECT_STT_BASE_URL"),
+        stt_api_key=_env_text("DIRECT_STT_API_KEY", openai_api_key),
+        stt_language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+        llm_model=_env_text("DIRECT_LLM_MODEL", DIRECT_DEFAULTS.llm_model),
+        llm_base_url=_env_text("DIRECT_LLM_BASE_URL", DIRECT_DEFAULTS.llm_base_url),
+        # The language model defaults to the Hugging Face router, so HF_TOKEN comes
+        # first, but a stage pointed elsewhere should still find a configured key.
+        llm_api_key=_env_text("DIRECT_LLM_API_KEY", (config.HF_TOKEN or "").strip() or openai_api_key),
+        tts_model=_env_text("DIRECT_TTS_MODEL", DIRECT_DEFAULTS.tts_model),
+        tts_base_url=_optional_env_text("DIRECT_TTS_BASE_URL"),
+        tts_api_key=_env_text("DIRECT_TTS_API_KEY", openai_api_key),
+        tts_sample_rate=_env_int("DIRECT_TTS_SAMPLE_RATE", DIRECT_DEFAULTS.tts_sample_rate),
+        tts_voice=_optional_env_text("DIRECT_TTS_VOICE"),
+        # Off by default because the default endpoint's model reads text only.
+        llm_vision=_env_flag("DIRECT_LLM_VISION", default=False),
+    )
+
+
+@dataclass(frozen=True)
+class SpeechDetectionSettings:
+    """Thresholds for the direct backend's in-handler voice activity detection.
+
+    Levels are float32 RMS (0..1) and the ratios are multiples of the tracked
+    noise floor. The barge-in values apply while Reachy is talking, so its own
+    voice leaking through the microphone cannot open a turn.
+    """
+
+    window_s: float = 0.02
+    min_level: float = 0.006
+    barge_in_min_level: float = 0.012
+    speech_start_ratio: float = 3.0
+    barge_in_ratio: float = 6.0
+    speech_start_s: float = 0.12
+    barge_in_start_s: float = 0.3
+    silence_end_s: float = 0.45
+    preroll_s: float = 0.3
+    min_utterance_s: float = 0.25
+    max_utterance_s: float = 20.0
+
+
+def get_speech_detection_settings() -> SpeechDetectionSettings:
+    """Read voice activity detection thresholds from the environment."""
+    defaults = SpeechDetectionSettings()
+    return SpeechDetectionSettings(
+        min_level=_env_float("DIRECT_VAD_MIN_LEVEL", defaults.min_level),
+        barge_in_min_level=_env_float("DIRECT_VAD_BARGE_IN_MIN_LEVEL", defaults.barge_in_min_level),
+        speech_start_ratio=_env_float("DIRECT_VAD_SPEECH_START_RATIO", defaults.speech_start_ratio),
+        barge_in_ratio=_env_float("DIRECT_VAD_BARGE_IN_RATIO", defaults.barge_in_ratio),
+        speech_start_s=_env_float("DIRECT_VAD_SPEECH_START_S", defaults.speech_start_s),
+        barge_in_start_s=_env_float("DIRECT_VAD_BARGE_IN_START_S", defaults.barge_in_start_s),
+        silence_end_s=_env_float("DIRECT_VAD_SILENCE_END_S", defaults.silence_end_s),
+        preroll_s=_env_float("DIRECT_VAD_PREROLL_S", defaults.preroll_s),
+        min_utterance_s=_env_float("DIRECT_VAD_MIN_UTTERANCE_S", defaults.min_utterance_s),
+        max_utterance_s=_env_float("DIRECT_VAD_MAX_UTTERANCE_S", defaults.max_utterance_s),
+    )
 
 
 def get_hf_session_url() -> str | None:
