@@ -547,10 +547,15 @@ def resolve_available_voice(voice: str | None, *, source: str, fallback: str | N
 
 
 def get_conversation_backend() -> str:
-    """Return the selected conversation backend, defaulting to Hugging Face realtime."""
+    """Return the selected conversation backend.
+
+    Defaults to the OpenAI realtime backend, because this fork exists to be spoken to in
+    Japanese and the Hugging Face server's transcription does not cover it. The Hugging
+    Face backend stays fully supported and is one setting away.
+    """
     candidate = (os.getenv(CONVERSATION_BACKEND_ENV) or "").strip().lower()
     if not candidate:
-        return HF_BACKEND
+        return OPENAI_REALTIME_BACKEND
     if candidate not in {HF_BACKEND, DIRECT_BACKEND, OPENAI_REALTIME_BACKEND}:
         logger.warning(
             "Invalid %s=%r. Expected one of %s.",
@@ -558,7 +563,7 @@ def get_conversation_backend() -> str:
             candidate,
             ", ".join(sorted({HF_BACKEND, DIRECT_BACKEND, OPENAI_REALTIME_BACKEND})),
         )
-        return HF_BACKEND
+        return OPENAI_REALTIME_BACKEND
     return candidate
 
 
@@ -695,6 +700,22 @@ def get_hf_connection_selection() -> HFConnectionSelection:
 def has_hf_realtime_target() -> bool:
     """Return whether Hugging Face has a target for the selected mode."""
     return get_hf_connection_selection().has_target
+
+
+def backend_requires_openai_key() -> bool:
+    """Return whether the selected backend needs an OpenAI key to reach its endpoints."""
+    return get_conversation_backend() in {DIRECT_BACKEND, OPENAI_REALTIME_BACKEND}
+
+
+def has_backend_credential() -> bool:
+    """Return whether the selected backend has the credential it needs to connect.
+
+    One gate for every backend, so startup and the settings page cannot disagree about
+    whether the app is ready.
+    """
+    if backend_requires_openai_key():
+        return bool(_env_text("OPENAI_API_KEY", ""))
+    return has_hf_realtime_target()
 
 
 def set_instance_path(instance_path: str | Path | None) -> None:

@@ -122,14 +122,24 @@ pip install -e .[dev]                   # Development tools
 
 ## Configuration
 
-The default setup uses the Hugging Face backend and does not require an API key.
+**The one thing you have to set is an OpenAI API key.** The app defaults to the
+`openai_realtime` backend, because that is what makes Japanese work. On first start it says
+it is waiting for configuration; open the app's settings page, paste the key, and it
+connects — no restart. The key is saved in the app's own settings directory on the robot,
+alongside the personalities you create, so reinstalling the app does not lose it and
+nothing is written into the installed package.
 
-Copy `.env.example` to `.env` when you want to point Hugging Face at your own local endpoint.
+Expect roughly a dollar a day of API usage for casual conversation; a full day of testing
+came to $0.56.
+
+Everything below is optional. Copy `.env.example` to `.env` to set any of it by hand, or to
+point the Hugging Face backend at your own local endpoint.
 
 | Variable | Description |
 |----------|-------------|
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Input transcription language. Defaults to `en`. The deployed realtime backend transcribes only the languages its server supports; the direct backend passes this to its own speech-to-text, so `ja` works there. |
-| `CONVERSATION_BACKEND` | Backend selector: `huggingface` for the realtime websocket backend, `direct` to run voice activity detection locally and call speech and language APIs directly, `openai_realtime` for one round trip to OpenAI's realtime endpoint with detection still local. Defaults to `huggingface`. |
+| `OPENAI_API_KEY` | Key for the `openai_realtime` and `direct` backends. Normally set from the settings page rather than here. |
+| `CONVERSATION_BACKEND` | Backend selector: `openai_realtime` for one round trip to OpenAI's realtime endpoint with speech detection local, `direct` to run detection locally and call speech and language APIs separately, `huggingface` for the upstream realtime websocket backend. Defaults to `openai_realtime`; upstream defaults to `huggingface`. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |

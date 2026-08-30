@@ -19,7 +19,6 @@ from reachy_mini.io.jsonrpc import JsonRpcError
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_ja.config import (
-    HF_BACKEND,
     LOCKED_PROFILE,
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
@@ -32,8 +31,11 @@ from reachy_mini_conversation_ja.config import (
     get_available_voices,
     get_hf_direct_ws_url,
     build_hf_direct_ws_url,
+    has_backend_credential,
     has_hf_realtime_target,
     parse_hf_direct_target,
+    get_conversation_backend,
+    backend_requires_openai_key,
     get_hf_connection_selection,
     refresh_runtime_config_from_env,
 )
@@ -130,6 +132,8 @@ class LocalStream:
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
+        # Throttles re-reading the instance `.env` while waiting for a credential.
+        self._last_instance_env_read = 0.0
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
         self._backend_connection_state = "not_started"
@@ -340,6 +344,26 @@ class LocalStream:
             "backend_error": None if connected else self._backend_error,
         }
 
+    _INSTANCE_ENV_RELOAD_INTERVAL_S = 1.0
+
+    def _reload_instance_env(self) -> None:
+        """Load the instance `.env` into the environment, at most once a second."""
+        if not self._instance_path:
+            return
+        now = time.monotonic()
+        if now - self._last_instance_env_read < self._INSTANCE_ENV_RELOAD_INTERVAL_S:
+            return
+        self._last_instance_env_read = now
+        try:
+            from dotenv import load_dotenv
+
+            env_path = Path(self._instance_path) / ".env"
+            if env_path.exists():
+                load_dotenv(dotenv_path=str(env_path), override=True)
+                refresh_runtime_config_from_env()
+        except Exception:
+            pass  # Instance .env loading is optional; continue with defaults
+
     def _persist_env_values(self, updates: dict[str, str]) -> None:
         """Persist non-empty environment values in memory and in the instance `.env`."""
         normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
@@ -376,7 +400,8 @@ class LocalStream:
             try:
                 from dotenv import load_dotenv
 
-                load_dotenv(dotenv_path=str(env_path))
+                # override, or replacing a value leaves the old one live in this process.
+                load_dotenv(dotenv_path=str(env_path), override=True)
             except Exception:
                 pass
             refresh_runtime_config_from_env()
@@ -410,6 +435,13 @@ class LocalStream:
             logger.info("Removed %s from %s", ", ".join(normalized_names), env_path)
         except Exception as e:
             logger.warning("Failed to remove %s: %s", ", ".join(normalized_names), e)
+
+    def _persist_openai_api_key(self, raw_key: object) -> None:
+        """Validate and persist an OpenAI key to the instance `.env`."""
+        key = str(raw_key or "").strip()
+        if not key:
+            raise JsonRpcError("API key required", reason="empty_key", code=-32602)
+        self._persist_env_values({"OPENAI_API_KEY": key})
 
     def _persist_hf_direct_connection(self, host: str, port: int) -> None:
         """Persist a direct Hugging Face websocket target."""
@@ -542,16 +574,19 @@ class LocalStream:
             hf_connection_selection = get_hf_connection_selection()
             has_hf_connection = hf_connection_selection.has_target
             backend_connection = self._backend_connection_status()
+            # The credential the *selected* backend needs, never the credential itself.
+            configured = has_backend_credential()
             return {
-                "backend": HF_BACKEND,
-                "has_key": has_hf_connection,
+                "backend": get_conversation_backend(),
+                "needs_api_key": backend_requires_openai_key(),
+                "has_key": configured,
                 "has_hf_session_url": bool(hf_session_url),
                 "has_hf_ws_url": bool(hf_ws_url),
                 "has_hf_connection": has_hf_connection,
                 "hf_connection_mode": hf_connection_selection.mode,
                 "hf_direct_host": hf_direct_host,
                 "hf_direct_port": hf_direct_port,
-                "can_proceed": has_hf_connection,
+                "can_proceed": configured,
                 "can_proceed_with_hf": has_hf_connection,
                 "requires_restart": not self._can_rebuild_handler(),
                 **backend_connection,
@@ -607,6 +642,20 @@ class LocalStream:
 
         @rpc.method("backend.config")  # type: ignore[untyped-decorator]
         def _rpc_backend_config(params: dict[str, object]) -> dict[str, object]:
+            # An API key on its own is a complete request: the OpenAI backends need
+            # nothing else, and touching the Hugging Face settings would be a surprise.
+            if "api_key" in params and "hf_mode" not in params:
+                self._persist_openai_api_key(params.get("api_key"))
+                if self._can_rebuild_handler():
+                    self._mark_restart_requested("api_key_changed")
+                    message = "Key saved. Reconnecting backend."
+                else:
+                    message = "Key saved. Restart Reachy Mini Conversation from the desktop app to apply it."
+                return {"ok": True, "message": message, **_status_payload()}
+
+            if "api_key" in params:
+                self._persist_openai_api_key(params.get("api_key"))
+
             hf_selection = get_hf_connection_selection()
             hf_mode = str(params.get("hf_mode") or hf_selection.mode).strip().lower()
             if hf_mode == HF_LOCAL_CONNECTION_MODE:
@@ -747,37 +796,33 @@ class LocalStream:
         self._stop_event.clear()
 
         # Try to load an existing instance .env first (covers subsequent runs)
-        if self._instance_path:
-            try:
-                from dotenv import load_dotenv
-
-                env_path = Path(self._instance_path) / ".env"
-                if env_path.exists():
-                    load_dotenv(dotenv_path=str(env_path), override=True)
-                    refresh_runtime_config_from_env()
-            except Exception:
-                pass  # Instance .env loading is optional; continue with defaults
+        self._reload_instance_env()
 
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading the instance .env so status endpoint sees the right value)
         self._init_settings_ui_if_needed()
 
-        # If the Hugging Face target is still missing -> wait until provided via the settings UI
-        if not has_hf_realtime_target():
-            self._set_backend_connection_state("waiting_for_config", f"{HF_REALTIME_WS_URL_ENV} is not configured.")
+        # If the selected backend has no credential -> wait until one arrives via the UI
+        if not has_backend_credential():
+            missing = "OPENAI_API_KEY" if backend_requires_openai_key() else HF_REALTIME_WS_URL_ENV
+            self._set_backend_connection_state("waiting_for_config", f"{missing} is not configured.")
             if self._settings_app is None:
                 logger.error(
-                    "%s not found. Set it in the app .env before starting the Hugging Face backend.",
-                    HF_REALTIME_WS_URL_ENV,
+                    "%s not found. Set it in the app .env before starting the %s backend.",
+                    missing,
+                    get_conversation_backend(),
                 )
                 return
-            logger.warning("%s not found. Open the app settings page to configure it.", HF_REALTIME_WS_URL_ENV)
-            # Poll until a target becomes available (set via the settings UI)
+            logger.warning("%s not found. Open the app settings page to configure it.", missing)
+            # Poll until the credential becomes available. The settings UI puts it
+            # straight into the environment, but re-reading the file each second also
+            # picks up someone who edited the instance `.env` by hand.
             try:
-                while not self._stop_event.is_set() and not has_hf_realtime_target():
+                while not self._stop_event.is_set() and not has_backend_credential():
                     time.sleep(0.2)
+                    self._reload_instance_env()
             except KeyboardInterrupt:
-                logger.info("Interrupted while waiting for Hugging Face configuration.")
+                logger.info("Interrupted while waiting for backend configuration.")
                 return
             if self._stop_event.is_set():
                 return

@@ -28,8 +28,8 @@ def test_resolve_app_timeout_minutes(monkeypatch, raw_value, expected) -> None:
         ("direct", config.DIRECT_BACKEND),
         ("DIRECT", config.DIRECT_BACKEND),
         ("huggingface", config.HF_BACKEND),
-        ("", config.HF_BACKEND),  # unset keeps the realtime backend
-        ("whisper", config.HF_BACKEND),  # unknown values must not change the backend
+        ("", config.OPENAI_REALTIME_BACKEND),  # unset speaks Japanese out of the box
+        ("whisper", config.OPENAI_REALTIME_BACKEND),  # unknown values fall back to the default
     ],
 )
 def test_get_conversation_backend(monkeypatch, raw_value, expected) -> None:
@@ -138,3 +138,38 @@ def test_location_settings_read_the_environment(monkeypatch: pytest.MonkeyPatch)
 
     assert settings.timezone == "Asia/Tokyo"
     assert settings.place == "Kobe, Japan"
+
+
+@pytest.mark.parametrize(
+    ("backend", "requires_key"),
+    [
+        (config.OPENAI_REALTIME_BACKEND, True),
+        (config.DIRECT_BACKEND, True),
+        (config.HF_BACKEND, False),
+    ],
+)
+def test_which_backends_need_an_openai_key(monkeypatch: pytest.MonkeyPatch, backend: str, requires_key: bool) -> None:
+    """Only the backends that call OpenAI themselves need a key of the user's own."""
+    monkeypatch.setenv(config.CONVERSATION_BACKEND_ENV, backend)
+
+    assert config.backend_requires_openai_key() is requires_key
+
+
+def test_openai_backend_is_unconfigured_without_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Startup must not proceed on an empty key, which would only fail at connect time."""
+    monkeypatch.setenv(config.CONVERSATION_BACKEND_ENV, config.OPENAI_REALTIME_BACKEND)
+    monkeypatch.setenv("OPENAI_API_KEY", "   ")
+
+    assert config.has_backend_credential() is False
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    assert config.has_backend_credential() is True
+
+
+def test_hugging_face_backend_ignores_the_openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hosted Hugging Face backend is reached through a proxy, so it needs no key."""
+    monkeypatch.setenv(config.CONVERSATION_BACKEND_ENV, config.HF_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert config.has_backend_credential() is config.has_hf_realtime_target()

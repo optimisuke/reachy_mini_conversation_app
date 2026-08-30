@@ -1,8 +1,10 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
 from __future__ import annotations
+import os
 import sys
 import time
+import shutil
 import asyncio
 import logging
 import argparse
@@ -382,13 +384,42 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
     custom_app_url = "http://0.0.0.0:7860/"
     dont_start_webserver = False
 
+    def durable_instance_path(self) -> Path:
+        """Return a state directory that survives reinstalling the app.
+
+        The SDK derives its instance path from the module file, which puts the app's
+        own state — the API key, saved personalities, memory — inside site-packages,
+        where `pip install` and the daemon's app-cache reset delete it. State that took
+        a conversation to build should not live in the installed package, so this keeps
+        it under the user's data directory and moves anything already written.
+        """
+        # The shared logger is set up inside run(), which has not happened yet.
+        log = logging.getLogger(__name__)
+        xdg = (os.getenv("XDG_DATA_HOME") or "").strip()
+        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+        durable = base / "reachy_mini_conversation_ja"
+        # The SDK is not typed, so pin the module path to Path before using it.
+        packaged = Path(self._get_instance_path()).parent
+
+        try:
+            durable.mkdir(parents=True, exist_ok=True)
+            for item in sorted(packaged.glob(".env")) + sorted(packaged.glob("*.json")):
+                target = durable / item.name
+                if item.is_file() and not target.exists():
+                    shutil.copy2(item, target)
+                    log.info("Moved %s out of the installed package to %s", item.name, durable)
+        except OSError as exc:
+            log.warning("Falling back to the packaged state directory (%s): %s", packaged, exc)
+            return packaged
+        return durable
+
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         """Run the Reachy Mini conversation app."""
         asyncio.set_event_loop(asyncio.new_event_loop())
 
         args, _ = parse_args()
 
-        instance_path = self._get_instance_path().parent
+        instance_path = str(self.durable_instance_path())
         run(
             args,
             robot=reachy_mini,

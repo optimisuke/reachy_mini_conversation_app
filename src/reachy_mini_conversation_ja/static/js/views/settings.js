@@ -19,6 +19,10 @@ const HF_CONNECTION_MODES = Object.freeze({
 const DEFAULT_HF_HOST = "localhost";
 const DEFAULT_HF_PORT = 8765;
 
+// The Hugging Face backend is reached through a hosted proxy, so only these two ever
+// need a key of the user's own.
+const OPENAI_BACKENDS = Object.freeze(["direct", "openai_realtime"]);
+
 const HF_MODE_HINTS = Object.freeze({
   [HF_CONNECTION_MODES.DEPLOYED]: "Uses the hosted Hugging Face backend. No API key required.",
   [HF_CONNECTION_MODES.LOCAL]: "Connects directly to the host and port below.",
@@ -97,13 +101,31 @@ function buildConnectionSection({ onSaved } = {}) {
       hfPortInput
     )
   );
+  const apiKeyInput = h("input", {
+    type: "password",
+    name: "api_key",
+    autocomplete: "off",
+    placeholder: "sk-…",
+    class: "settings-input",
+  });
+  const apiKeyHint = h("p", { class: "settings-hint" }, "");
+  const apiKeyField = h(
+    "div",
+    { class: "settings-field-row", "data-role": "api-key-field" },
+    h(
+      "label",
+      { class: "settings-field" },
+      h("span", { class: "settings-label" }, "OpenAI API key"),
+      apiKeyInput
+    )
+  );
   const hint = h("p", { class: "settings-hint" }, "");
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
   const submitButton = h("button", { type: "submit", class: "btn btn--primary" }, "Save connection");
 
-  const form = h(
-    "form",
-    { class: "settings-form" },
+  const hfFields = h(
+    "div",
+    { "data-role": "hf-fields" },
     h(
       "label",
       { class: "settings-field" },
@@ -111,7 +133,15 @@ function buildConnectionSection({ onSaved } = {}) {
       hfModeSelect
     ),
     hfLocalFields,
-    hint,
+    hint
+  );
+
+  const form = h(
+    "form",
+    { class: "settings-form" },
+    apiKeyField,
+    apiKeyHint,
+    hfFields,
     h("div", { class: "settings-actions" }, submitButton),
     status
   );
@@ -123,6 +153,11 @@ function buildConnectionSection({ onSaved } = {}) {
     form
   );
 
+  // Set from the status payload; until it arrives, assume nothing needs a key so the
+  // form does not flash a field the backend may not want.
+  let needsApiKey = false;
+  let hasSavedKey = false;
+
   function syncLocalFields() {
     const isLocal = hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
     hfLocalFields.style.display = isLocal ? "" : "none";
@@ -131,6 +166,20 @@ function buildConnectionSection({ onSaved } = {}) {
     hfHostInput.required = isLocal;
     hfPortInput.required = isLocal;
     hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
+  }
+
+  function syncApiKeyField() {
+    // Only one backend's settings are ever relevant, so show only those.
+    hfFields.style.display = needsApiKey ? "none" : "";
+    apiKeyField.style.display = needsApiKey ? "" : "none";
+    apiKeyHint.style.display = needsApiKey ? "" : "none";
+    apiKeyInput.disabled = !needsApiKey;
+    // A saved key is never sent back here, so the box stays empty and asking for a
+    // value would block saving anything else.
+    apiKeyInput.required = needsApiKey && !hasSavedKey;
+    apiKeyHint.textContent = hasSavedKey
+      ? "A key is saved. Enter a new one to replace it."
+      : "Needed to reach OpenAI. Stored on the robot, in this app's own settings.";
   }
 
   hfModeSelect.addEventListener("change", syncLocalFields);
@@ -142,18 +191,30 @@ function buildConnectionSection({ onSaved } = {}) {
     hfModeSelect.disabled = true;
     hfHostInput.disabled = true;
     hfPortInput.disabled = true;
+    apiKeyInput.disabled = true;
     form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
     status.textContent = "Saving…";
     try {
-      const payload = { hf_mode: hfModeSelect.value };
-      if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
-        payload.hf_host = hfHostInput.value.trim();
-        if (hfPortInput.value) {
-          payload.hf_port = Number.parseInt(hfPortInput.value, 10);
+      const key = apiKeyInput.value.trim();
+      const payload = {};
+      if (needsApiKey) {
+        if (key) payload.api_key = key;
+      } else {
+        payload.hf_mode = hfModeSelect.value;
+        if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
+          payload.hf_host = hfHostInput.value.trim();
+          if (hfPortInput.value) {
+            payload.hf_port = Number.parseInt(hfPortInput.value, 10);
+          }
         }
       }
+      if (!Object.keys(payload).length) {
+        status.textContent = "Nothing to save.";
+        return;
+      }
       const result = await saveBackendConfig(payload);
+      apiKeyInput.value = "";
       status.textContent =
         result?.message || (result?.requires_restart ? "Saved. Restart the app to apply." : "Saved.");
       await onSaved?.();
@@ -164,15 +225,21 @@ function buildConnectionSection({ onSaved } = {}) {
       submitButton.disabled = false;
       hfModeSelect.disabled = false;
       syncLocalFields();
+      syncApiKeyField();
       form.removeAttribute("aria-busy");
     }
   });
 
   syncLocalFields();
+  syncApiKeyField();
 
   return {
     element,
     syncFromStatus(payload) {
+      needsApiKey =
+        payload?.needs_api_key ?? OPENAI_BACKENDS.includes(payload?.backend);
+      hasSavedKey = Boolean(payload?.has_key);
+      syncApiKeyField();
       if (Object.values(HF_CONNECTION_MODES).includes(payload?.hf_connection_mode)) {
         hfModeSelect.value = payload.hf_connection_mode;
       }

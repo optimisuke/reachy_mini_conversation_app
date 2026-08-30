@@ -13,7 +13,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import reachy_mini_conversation_ja.console as console_mod
-from reachy_mini_conversation_ja.config import HF_AVAILABLE_VOICES, config
+from reachy_mini_conversation_ja.config import (
+    HF_BACKEND,
+    HF_AVAILABLE_VOICES,
+    OPENAI_REALTIME_BACKEND,
+    CONVERSATION_BACKEND_ENV,
+    config,
+)
 from reachy_mini_conversation_ja.console import LocalStream
 from reachy_mini_conversation_ja.startup_settings import (
     StartupSettings,
@@ -181,6 +187,8 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rebuild-capable LocalStream should reconnect in process after a connection change."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
     monkeypatch.delenv("HF_REALTIME_CONNECTION_MODE", raising=False)
@@ -216,6 +224,8 @@ def test_backend_config_persists_local_hf_selection_and_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Settings API should persist a direct Hugging Face websocket target."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
@@ -285,6 +295,8 @@ def test_backend_config_switches_to_saved_local_hf_connection_without_payload_ta
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Switching back to a saved local Hugging Face backend should reuse the persisted target."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     env_path = tmp_path / ".env"
     env_path.write_text(
         "HF_REALTIME_CONNECTION_MODE=local\nHF_REALTIME_WS_URL=ws://192.168.1.42:8766/v1/realtime\n",
@@ -343,6 +355,8 @@ def test_status_reports_direct_hf_ws_url_as_ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Settings API should treat a direct Hugging Face websocket as a valid configuration."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
@@ -367,6 +381,8 @@ def test_status_reports_backend_connection_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Settings API should expose backend connection failures without hiding controls."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
@@ -750,6 +766,8 @@ def test_local_stream_launch_waits_for_missing_hf_target_without_starting_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Startup should wait for settings input when the Hugging Face target is missing."""
+    # This exercises the Hugging Face backend, which is no longer the default.
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, HF_BACKEND)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
@@ -905,3 +923,139 @@ async def test_record_loop_forwards_frames_back_to_back() -> None:
     await asyncio.wait_for(loop_task, timeout=1.0)
 
     assert handler.receive.await_count == 3
+
+
+def _key_stream(tmp_path: Path, app: FastAPI) -> Any:
+    """Build a rebuild-capable LocalStream with the settings UI mounted."""
+    handler = MagicMock()
+    handler.shutdown = AsyncMock()
+    # A MagicMock here is not JSON-serialisable and hangs the whole suite.
+    handler._is_connected.return_value = False
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(
+        handler,
+        robot,
+        settings_app=app,
+        instance_path=str(tmp_path),
+        handler_factory=lambda _voice: handler,
+    )
+    stream._init_settings_ui_if_needed()
+    return stream
+
+
+def test_status_reports_the_openai_backend_as_unconfigured_without_a_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings page must know to ask for a key, not report a ready backend."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    data = _rpc_call(app, "conversation.status")["result"]
+
+    assert data["backend"] == OPENAI_REALTIME_BACKEND
+    assert data["needs_api_key"] is True
+    assert data["has_key"] is False
+    assert data["can_proceed"] is False
+
+
+def test_backend_config_saves_an_api_key_and_reconnects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key alone is a complete request: it is stored and the backend reconnects."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    app = FastAPI()
+    stream = _key_stream(tmp_path, app)
+
+    data = _rpc_call(app, "backend.config", {"api_key": "  sk-written-by-the-ui  "})["result"]
+
+    assert data["ok"] is True
+    assert data["message"] == "Key saved. Reconnecting backend."
+    assert data["has_key"] is True
+    assert data["can_proceed"] is True
+    assert stream._restart_requested.is_set()
+    # Saved outside the installed package, where a reinstall cannot delete it.
+    assert "OPENAI_API_KEY=sk-written-by-the-ui" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_backend_config_rejects_a_blank_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Saving whitespace would look like success and fail later at connect time."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    response = _rpc_call(app, "backend.config", {"api_key": "   "})
+
+    assert response["error"]["data"]["reason"] == "empty_key"
+    assert not (tmp_path / ".env").exists()
+
+
+def test_saving_a_key_leaves_the_hugging_face_settings_alone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entering a key must not silently repoint the Hugging Face backend."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    _rpc_call(app, "backend.config", {"api_key": "sk-test"})
+
+    # A fresh instance .env is seeded from .env.example, so assert on the assignments
+    # this save actually made rather than on the template's own lines.
+    assignments = {
+        line.split("=", 1)[0]
+        for line in (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    assert "OPENAI_API_KEY" in assignments
+    assert not {name for name in assignments if name.startswith("HF_REALTIME")}
+
+
+def test_launch_picks_up_a_key_written_into_the_instance_env_while_waiting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Someone without the settings page can drop the key in the file and be picked up."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    media = SimpleNamespace(start_recording=MagicMock(), start_playing=MagicMock())
+    robot = SimpleNamespace(media=media)
+    stream = LocalStream(MagicMock(), robot, settings_app=FastAPI(), instance_path=str(tmp_path))
+    monkeypatch.setattr(stream, "_init_settings_ui_if_needed", MagicMock())
+
+    # The key appears on the second look, as if pasted while the app waited. Sleeping is
+    # what advances the loop, so write the file there; the third call ends the test.
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds: float) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-pasted\n", encoding="utf-8")
+            # The throttle would otherwise swallow the reload inside one test second.
+            stream._last_instance_env_read = 0.0
+        elif calls["n"] > 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr("reachy_mini_conversation_ja.console.time.sleep", fake_sleep)
+    # Stop right after the gate opens, before any media or event loop starts.
+    media.start_recording = MagicMock(side_effect=KeyboardInterrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        stream.launch()
+
+    media.start_recording.assert_called_once()
