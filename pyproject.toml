@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "reachy_mini_conversation_app"
 version = "1.0.1"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
-description = ""
+description = "Talk with Reachy Mini in Japanese"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -47,7 +47,7 @@ exclude-newer = "7 days"
 "reachy-mini-dances-library" = false
 
 [project.entry-points."reachy_mini_apps"]
-reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
+reachy_mini_conversation_ja = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
