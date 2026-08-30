@@ -67,6 +67,8 @@ _PLAYBACK_CHUNK_SAMPLES: Final[int] = 640  # 40 ms at 16 kHz
 # Stay this far ahead of the speaker so playback never starves while the pacing
 # still keeps unplayed audio short enough for a barge-in to drop it.
 _PLAYBACK_LEAD_S: Final[float] = 0.2
+# The speaker drains and the room rings after the last frame leaves the queue.
+_SPEAKING_TAIL_S: Final[float] = 0.4
 
 
 class DirectCascadeHandler(ConversationHandler):
@@ -186,8 +188,8 @@ class DirectCascadeHandler(ConversationHandler):
         """Mark the user as talking, interrupting Reachy when it is mid-answer."""
         self._mark_activity("user_speech_started")
         self.deps.movement_manager.set_listening(True)
-        if self._assistant_speaking or self._turn_task is not None:
-            logger.info("User barge-in: dropping the in-flight response")
+        if self._assistant_speaking:
+            logger.info("User barge-in: dropping the response being spoken")
             await self._cancel_active_turn()
             await self._stop_speaking()
 
@@ -244,21 +246,25 @@ class DirectCascadeHandler(ConversationHandler):
         services = self._services
         if services is None:
             return
+        history_mark = len(self._messages)
         try:
             for _ in range(_MAX_TOOL_ROUNDS):
-                tool_calls = await self._stream_one_response(services)
+                text, tool_calls = await self._stream_one_response(services)
                 if not tool_calls:
                     return
-                await self._run_tool_calls(tool_calls)
+                await self._run_tool_calls(text, tool_calls)
             logger.warning("Giving up after %d tool rounds without a spoken answer", _MAX_TOOL_ROUNDS)
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            # Roll this turn back: a history the model rejects would fail every
+            # later turn too, leaving Reachy silent until the app restarts.
+            del self._messages[history_mark:]
             logger.error("Response generation failed: %s", e)
             await self._emit_error(f"response failed: {e}")
 
-    async def _stream_one_response(self, services: SpeechServices) -> list[ToolCallRequest]:
-        """Speak one streamed model response and return the tool calls it requested."""
+    async def _stream_one_response(self, services: SpeechServices) -> tuple[str, list[ToolCallRequest]]:
+        """Speak one streamed model response and return its text and requested tool calls."""
         self._mark_activity("response_created")
         voice = self.get_current_voice()
         sentences = SentenceBuffer()
@@ -278,7 +284,8 @@ class DirectCascadeHandler(ConversationHandler):
             await self._speech_queue.put((remainder, voice))
 
         text = "".join(spoken_text).strip()
-        self._messages.append(self._assistant_message(text, tool_calls))
+        if not tool_calls:
+            self._messages.append(self._assistant_message(text, tool_calls))
         if text:
             self._mark_activity("assistant_transcript_done")
             if self._turn_user_done_at is not None:
@@ -288,7 +295,7 @@ class DirectCascadeHandler(ConversationHandler):
                 )
             await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": text}))
             self._emit_transcript("assistant", text, True)
-        return tool_calls
+        return text, tool_calls
 
     @staticmethod
     def _assistant_message(text: str, tool_calls: list[ToolCallRequest]) -> ChatCompletionAssistantMessageParam:
@@ -305,8 +312,8 @@ class DirectCascadeHandler(ConversationHandler):
             ]
         return message
 
-    async def _run_tool_calls(self, tool_calls: list[ToolCallRequest]) -> None:
-        """Run every requested tool and append one history entry per call."""
+    async def _run_tool_calls(self, text: str, tool_calls: list[ToolCallRequest]) -> None:
+        """Run every requested tool, then record the request and its replies together."""
         loop = asyncio.get_running_loop()
         results: dict[str, asyncio.Future[dict[str, Any]]] = {}
         try:
@@ -344,6 +351,9 @@ class DirectCascadeHandler(ConversationHandler):
             except asyncio.TimeoutError:
                 logger.warning("Some tools did not finish within %.0fs", _TOOL_RESULT_TIMEOUT_S)
 
+            # No await between these appends: the model rejects a tool request
+            # whose replies are missing, so the pair has to be uninterruptible.
+            self._messages.append(self._assistant_message(text, tool_calls))
             for call_id, future in results.items():
                 output = future.result() if future.done() else {"error": "tool did not finish in time"}
                 self._messages.append(
@@ -441,8 +451,9 @@ class DirectCascadeHandler(ConversationHandler):
         now = time.monotonic()
         self._playback_ends_at = max(self._playback_ends_at, now) + pcm.size / self.SAMPLE_RATE
         if self._speech_queue.empty():
-            await asyncio.sleep(max(0.0, self._playback_ends_at - time.monotonic()))
-            self._set_speaking(False)
+            await asyncio.sleep(max(0.0, self._playback_ends_at - time.monotonic()) + _SPEAKING_TAIL_S)
+            if self._speech_queue.empty():
+                self._set_speaking(False)
             return
         await asyncio.sleep(max(0.0, self._playback_ends_at - time.monotonic() - _PLAYBACK_LEAD_S))
 

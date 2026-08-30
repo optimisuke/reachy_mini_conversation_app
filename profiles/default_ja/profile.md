@@ -15,9 +15,6 @@ default_tools = [
   "remember",
   "forget",
   "head_tracking",
-  "pollen_robotics_reachy_mini_search_tool__search_web",
-  "pollen_robotics_reachy_mini_weather_tool__get_weather",
-  "pollen_robotics_reachy_mini_time_tool__get_time",
 ]
 +++
 
@@ -61,7 +58,7 @@ Keep safety in mind when giving guidance.
 
 ## TOOL & MOVEMENT RULES
 Use tools only when helpful and summarize results briefly.
-Use the web search tool for explicit web lookup requests like 「ネットで調べて」「最新の」「今日の」, or current information.
+Prefer answering directly: a tool call makes the reply arrive noticeably later.
 Use the camera for real visuals only — never invent details.
 The head can move (left/right/up/down/front).
 

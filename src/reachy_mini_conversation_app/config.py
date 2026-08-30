@@ -587,7 +587,7 @@ class SpeechDetectionSettings:
     barge_in_ratio: float = 6.0
     speech_start_s: float = 0.12
     barge_in_start_s: float = 0.3
-    silence_end_s: float = 0.7
+    silence_end_s: float = 0.55
     preroll_s: float = 0.3
     min_utterance_s: float = 0.25
     max_utterance_s: float = 20.0

@@ -307,3 +307,81 @@ async def test_applying_a_personality_restarts_the_history(monkeypatch: Any) -> 
 
         assert status == "Applied personality."
         assert handler._messages == [{"role": "system", "content": "instructions"}]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_tool_turn_leaves_no_unanswered_request(monkeypatch: Any) -> None:
+    """A tool request must never outlive its replies: the model rejects that history."""
+    tool_never_finishes = asyncio.Event()
+
+    async def block(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await tool_never_finishes.wait()
+        return {}
+
+    monkeypatch.setattr(background_tool_manager, "dispatch_tool_call", block)
+    handler, _stt, chat_model, _tts = _make_handler(
+        monkeypatch,
+        transcripts=["写真とって"],
+        rounds=[[ToolCallRequest(call_id="call-1", name="camera", arguments="{}")]],
+    )
+
+    async with _running(handler):
+        await _say_something(handler)
+        await _wait_for(lambda: bool(chat_model.seen_messages))
+        await _wait_for(lambda: handler._pending_tool_results != {})
+        await handler._cancel_active_turn()
+
+        assert not any(message.get("tool_calls") for message in handler._messages)
+
+    tool_never_finishes.set()
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_response_rolls_the_turn_back(monkeypatch: Any) -> None:
+    """A failed response must not poison the history, or every later turn fails too."""
+
+    class _FailingChatModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, messages: Sequence[Any], tool_specs: Sequence[Any]) -> AsyncIterator[ChatEvent]:
+            self.calls += 1
+            raise RuntimeError("400 invalid_request_error")
+            yield TextDelta("")  # pragma: no cover - keeps this an async generator
+
+    handler, _stt, _chat, _tts = _make_handler(monkeypatch, transcripts=["こんにちは"])
+    failing = _FailingChatModel()
+
+    async with _running(handler):
+        assert handler._services is not None
+        object.__setattr__(handler._services, "chat_model", failing)
+        history_before = list(handler._messages)
+
+        await _say_something(handler)
+        await _wait_for(lambda: failing.calls == 1)
+        await _wait_for(lambda: handler._turn_task is None)
+        pairs = _transcript_messages(handler)
+
+    # The user turn stays, the failed assistant turn leaves nothing behind.
+    assert handler._messages == [*history_before, {"role": "user", "content": "こんにちは"}]
+    assert any("[error]" in content for _role, content in pairs)
+
+
+@pytest.mark.asyncio
+async def test_noise_while_thinking_does_not_drop_the_answer(monkeypatch: Any) -> None:
+    """Only speech over Reachy's own voice interrupts; a turn still thinking is left alone."""
+    handler, _stt, _chat, _tts = _make_handler(monkeypatch, rounds=[[TextDelta("はい。")]])
+    flushes: list[bool] = []
+    handler._clear_queue = lambda: flushes.append(True)
+
+    async with _running(handler):
+        handler._turn_task = asyncio.create_task(asyncio.sleep(5), name="pretend-turn")
+        turn = handler._turn_task
+
+        await handler._on_speech_started()
+
+        assert handler._turn_task is turn
+        assert not turn.cancelled()
+        assert flushes == []
+        turn.cancel()
+        handler._turn_task = None
