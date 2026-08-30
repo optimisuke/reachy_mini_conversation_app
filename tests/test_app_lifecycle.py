@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, call
 import numpy as np
 
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
-from reachy_mini_conversation_app import app_lifecycle
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_ja import app_lifecycle
+from reachy_mini_conversation_ja.tools.core_tools import ToolDependencies
 
 
 def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:

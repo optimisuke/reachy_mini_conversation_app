@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import Any
 
-import reachy_mini_conversation_app.idle_policy as idle_policy_mod
-from reachy_mini_conversation_app.tools.move_head import MoveHead
-from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
-from reachy_mini_conversation_app.tools.idle_do_nothing import IdleDoNothing
+import reachy_mini_conversation_ja.idle_policy as idle_policy_mod
+from reachy_mini_conversation_ja.tools.move_head import MoveHead
+from reachy_mini_conversation_ja.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_ja.tools.idle_do_nothing import IdleDoNothing
 
 
 class FakeIdleTool(Tool):

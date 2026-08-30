@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from reachy_mini_conversation_app.config import SpeechDetectionSettings
-from reachy_mini_conversation_app.voice_activity import SpeechSegmenter
+from reachy_mini_conversation_ja.config import SpeechDetectionSettings
+from reachy_mini_conversation_ja.voice_activity import SpeechSegmenter
 
 
 SAMPLE_RATE = 16000

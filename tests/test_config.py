@@ -2,7 +2,7 @@
 
 import pytest
 
-from reachy_mini_conversation_app import config
+from reachy_mini_conversation_ja import config
 
 
 @pytest.mark.parametrize(

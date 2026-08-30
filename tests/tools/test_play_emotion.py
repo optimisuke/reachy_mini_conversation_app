@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from reachy_mini_conversation_app.tools import play_emotion as play_emotion_module
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.tools.play_emotion import (
+from reachy_mini_conversation_ja.tools import play_emotion as play_emotion_module
+from reachy_mini_conversation_ja.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_ja.tools.play_emotion import (
     EMOTION_INTENTS,
     PlayEmotion,
     resolve_emotion_name,

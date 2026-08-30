@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 import numpy as np
 import pytest
 
-from reachy_mini_conversation_app.config import DirectBackendSettings
-from reachy_mini_conversation_app.speech_services import (
+from reachy_mini_conversation_ja.config import DirectBackendSettings
+from reachy_mini_conversation_ja.speech_services import (
     TextDelta,
     SentenceBuffer,
     ToolCallRequest,
@@ -219,7 +219,7 @@ def test_build_speech_services_reports_the_missing_credential() -> None:
 
 def test_build_speech_services_reports_a_missing_language_model_token(monkeypatch) -> None:
     """The language model key should fall back to the Hugging Face token, then fail clearly."""
-    monkeypatch.setattr("reachy_mini_conversation_app.speech_services.get_token", lambda: None)
+    monkeypatch.setattr("reachy_mini_conversation_ja.speech_services.get_token", lambda: None)
 
     with pytest.raises(RuntimeError, match="HF_TOKEN"):
         build_speech_services(_settings(llm_api_key=""))

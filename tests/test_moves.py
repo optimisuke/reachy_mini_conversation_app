@@ -8,8 +8,8 @@ import pytest
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
-from reachy_mini_conversation_app.moves import MovementManager
-from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+from reachy_mini_conversation_ja.moves import MovementManager
+from reachy_mini_conversation_ja.dance_emotion_moves import EmotionQueueMove
 
 
 class _FakeMove:

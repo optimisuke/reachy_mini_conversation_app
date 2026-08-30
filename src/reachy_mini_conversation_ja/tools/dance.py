@@ -1,0 +1,91 @@
+import random
+import logging
+from typing import Any, Dict
+
+from reachy_mini_conversation_ja.tools.core_tools import Tool, ToolDependencies
+
+
+logger = logging.getLogger(__name__)
+
+# Initialize dance library
+try:
+    from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
+    from reachy_mini_conversation_ja.dance_emotion_moves import DanceQueueMove
+
+    DANCE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Dance library not available: {e}")
+    AVAILABLE_MOVES = {}
+    DANCE_AVAILABLE = False
+
+
+# The sibling play_emotion tool accepts "random" as a value, so models reach for it
+# here too. Take it rather than rejecting the move they asked for.
+RANDOM_MOVE = "random"
+
+
+def get_available_dances_and_descriptions() -> str:
+    """Get formatted list of available dances with descriptions."""
+    if not DANCE_AVAILABLE:
+        return "Moves not available."
+
+    if not AVAILABLE_MOVES:
+        return "Moves not available."
+
+    output = ""
+    for move_name, (func, params, metadata) in AVAILABLE_MOVES.items():
+        description = metadata.get("description", "No description available.")
+        output += f"{move_name}: {description}\n"
+    return output
+
+
+class Dance(Tool):
+    """Play a named or random dance move once (or repeat). Non-blocking."""
+
+    name = "dance"
+    description = "Play a named or random dance move once (or repeat). Non-blocking."
+    needs_response = False
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "move": {
+                "type": "string",
+                "enum": [*AVAILABLE_MOVES, RANDOM_MOVE] if DANCE_AVAILABLE else [],
+                "description": f"""Name of the move to play. Use {RANDOM_MOVE} if you have no preference.
+                                Here is a list of the available moves, you MUST only choose from these: \n
+                                {get_available_dances_and_descriptions()}
+                                """,
+            },
+            "repeat": {
+                "type": "integer",
+                "description": "How many times to repeat the move (default 1).",
+            },
+        },
+        "required": [],
+    }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Play a named or random dance move once (or repeat). Non-blocking."""
+        if not DANCE_AVAILABLE:
+            return {"error": "Dance system not available"}
+
+        if not AVAILABLE_MOVES:
+            return {"error": "No moves currently available"}
+
+        move_name = kwargs.get("move")
+        repeat = int(kwargs.get("repeat", 1))
+
+        logger.info("Tool call: dance move=%s repeat=%d", move_name, repeat)
+
+        if not move_name or move_name == RANDOM_MOVE:
+            move_name = random.choice(list(AVAILABLE_MOVES.keys()))
+
+        if move_name not in AVAILABLE_MOVES:
+            return {"error": f"Unknown dance move '{move_name}'. Available: {list(AVAILABLE_MOVES.keys())}"}
+
+        movement_manager = deps.movement_manager
+        for _ in range(repeat):
+            dance_move = DanceQueueMove(move_name)
+            movement_manager.queue_move(dance_move)
+
+        return {"status": "queued", "move": move_name, "repeat": repeat}

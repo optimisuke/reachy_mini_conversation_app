@@ -11,10 +11,10 @@ import httpx
 import pytest
 from huggingface_hub.errors import RepositoryNotFoundError
 
-import reachy_mini_conversation_app.config as config_mod
-from reachy_mini_conversation_app.main import main
-from reachy_mini_conversation_app.mcp_client import RemoteToolSpec, RemoteMcpToolClient
-from reachy_mini_conversation_app.tool_spaces import (
+import reachy_mini_conversation_ja.config as config_mod
+from reachy_mini_conversation_ja.main import main
+from reachy_mini_conversation_ja.mcp_client import RemoteToolSpec, RemoteMcpToolClient
+from reachy_mini_conversation_ja.tool_spaces import (
     ToolSpaceProfileUpdateError,
     remove_tool_space,
     install_tool_space,
@@ -22,8 +22,8 @@ from reachy_mini_conversation_app.tool_spaces import (
     handle_tool_spaces_command,
     read_installed_tool_spaces,
 )
-from reachy_mini_conversation_app.profile_store import write_profile
-from reachy_mini_conversation_app.profile_toolsets import (
+from reachy_mini_conversation_ja.profile_store import write_profile
+from reachy_mini_conversation_ja.profile_toolsets import (
     read_profile_tool_names,
     read_profile_tool_override,
     write_profile_tool_override,
@@ -88,11 +88,11 @@ def test_tool_spaces_add_list_remove_round_trip(
     """The CLI should install, list, and remove a public Space tool source cleanly."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _mock_list_tool_specs,
     )
 
@@ -100,7 +100,7 @@ def test_tool_spaces_add_list_remove_round_trip(
         _run_cli(
             monkeypatch,
             [
-                "reachy-mini-conversation-app",
+                "reachy-mini-conversation-ja",
                 "tool-spaces",
                 "add",
                 SEARCH_SPACE_SLUG,
@@ -136,11 +136,11 @@ def test_tool_spaces_add_list_remove_round_trip(
     }
 
     resolve_tool_space = MagicMock(side_effect=AssertionError("list must use cached metadata"))
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.resolve_tool_space_sync", resolve_tool_space)
-    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "list"]) == 0
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_spaces.resolve_tool_space_sync", resolve_tool_space)
+    assert _run_cli(monkeypatch, ["reachy-mini-conversation-ja", "tool-spaces", "list"]) == 0
     resolve_tool_space.assert_not_called()
 
-    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
+    assert _run_cli(monkeypatch, ["reachy-mini-conversation-ja", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
     assert SEARCH_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(None).spaces]
 
 
@@ -151,12 +151,12 @@ def test_tool_spaces_add_installs_private_space_with_token(
     """A private Space resolves and installs when an HF token is available."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_private_space_info(slug),
     )
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_spaces.get_token", lambda: "hf_test_token")
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _mock_list_tool_specs,
     )
 
@@ -181,11 +181,11 @@ def test_resolve_tool_space_sends_auth_only_to_private_spaces(
 ) -> None:
     """Private Spaces use the configured/login token while public Spaces receive no credentials."""
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_private_space_info(slug) if private else _mock_public_space_info(slug),
     )
     monkeypatch.setattr(config_mod.config, "HF_TOKEN", configured_token)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: login_token)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_spaces.get_token", lambda: login_token)
     authorization: str | None = None
 
     async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
@@ -194,7 +194,7 @@ def test_resolve_tool_space_sends_auth_only_to_private_spaces(
         return await _mock_list_tool_specs(self)
 
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _capture_authorization,
     )
 
@@ -216,9 +216,9 @@ def test_tool_spaces_add_private_space_without_token_hints_at_auth(
             "404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://hf.co"))
         )
 
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi.space_info", _raise_not_found)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_spaces.HfApi.space_info", _raise_not_found)
     monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_spaces.get_token", lambda: None)
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", PRIVATE_SPACE_SLUG]) == 1
     assert "hf auth login" in capsys.readouterr().err
@@ -231,11 +231,11 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
 ) -> None:
     """Managed instance paths should store the manifest beside other instance-local state."""
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _mock_list_tool_specs,
     )
 
@@ -304,11 +304,11 @@ def test_tool_spaces_add_rejects_alias_collision(
     """A second Space whose slug normalizes to the same alias must be rejected."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _mock_list_tool_specs,
     )
 
@@ -338,13 +338,13 @@ def _setup_profile(tmp_path: Path, profile: str, default_tools: list[str] | None
 
 def _mock_add(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("reachy_mini_conversation_app.profile_store.DEFAULT_PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr("reachy_mini_conversation_ja.profile_store.DEFAULT_PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _mock_list_tool_specs,
     )
 
@@ -438,7 +438,7 @@ def test_tool_space_install_profile_failure_leaves_manifest_unchanged(
     instance_path = tmp_path / "instance"
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.enable_profile_tools",
+        "reachy_mini_conversation_ja.tool_spaces.enable_profile_tools",
         MagicMock(side_effect=OSError("profile store unavailable")),
     )
 
@@ -459,7 +459,7 @@ def test_tool_space_install_manifest_failure_rolls_back_profile(
     instance_path = tmp_path / "instance"
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        "reachy_mini_conversation_ja.tool_spaces.write_installed_tool_spaces",
         MagicMock(side_effect=OSError("manifest store unavailable")),
     )
 
@@ -494,7 +494,7 @@ def test_tool_space_install_rollback_does_not_overwrite_concurrent_profile_save(
         write_profile_tool_override("guide", ["camera"], instance_path)
 
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        "reachy_mini_conversation_ja.tool_spaces.write_installed_tool_spaces",
         fail_manifest_write,
     )
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -526,7 +526,7 @@ def test_tool_space_remove_manifest_failure_rolls_back_profiles(
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     install_tool_space(SEARCH_SPACE_SLUG, instance_path, profile="guide")
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        "reachy_mini_conversation_ja.tool_spaces.write_installed_tool_spaces",
         MagicMock(side_effect=OSError("manifest store unavailable")),
     )
 
@@ -583,7 +583,7 @@ def test_install_tool_space_refreshes_cached_metadata(
 ) -> None:
     """Re-adding an installed Space should replace its cached tool metadata."""
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        "reachy_mini_conversation_ja.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
     descriptions = ["First description", "Refreshed description"]
@@ -600,7 +600,7 @@ def test_install_tool_space_refreshes_cached_metadata(
         ]
 
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        "reachy_mini_conversation_ja.tool_spaces.RemoteMcpToolClient.list_tool_specs",
         _list_tool_specs,
     )
 

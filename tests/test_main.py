@@ -4,7 +4,7 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import reachy_mini_conversation_app.main as main_mod
+import reachy_mini_conversation_ja.main as main_mod
 
 
 def test_inactivity_timeout_thread_goes_to_sleep() -> None:

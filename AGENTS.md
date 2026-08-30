@@ -92,8 +92,8 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 ## Project layout
 
 ```
-src/reachy_mini_conversation_app/
-  main.py                 # entry point + CLI (reachy-mini-conversation-app)
+src/reachy_mini_conversation_ja/
+  main.py                 # entry point + CLI (reachy-mini-conversation-ja)
   huggingface_realtime.py # Hugging Face backend + shared realtime conversation loop
   conversation_handler.py # wires audio/tools/backend together
   config.py               # configuration + env loading
@@ -123,7 +123,7 @@ ruff check . --fix && ruff format . && mypy --pretty --show-error-codes && pytes
 | Format      | `ruff format .`                      |
 | Type-check  | `mypy --pretty --show-error-codes`   |
 | Tests       | `pytest tests/ -v`                   |
-| Run the app | `reachy-mini-conversation-app`       |
+| Run the app | `reachy-mini-conversation-ja`       |
 
 If you change dependencies, keep `uv.lock` in sync by running `uv lock` (CI validates it).
 

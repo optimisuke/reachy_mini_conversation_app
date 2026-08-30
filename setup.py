@@ -7,7 +7,7 @@ from setuptools.command.build_py import build_py
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 SOURCE_PROFILES_DIR = PROJECT_ROOT / "profiles"
-TARGET_PACKAGE = "reachy_talk_data"
+TARGET_PACKAGE = "reachy_talk_data_ja"
 TARGET_SUBDIR = "profiles"
 
 
@@ -15,7 +15,7 @@ class BuildPyWithProfiles(build_py):
     """Copy built-in profiles into the wheel data package at build time."""
 
     def run(self) -> None:
-        """Build Python modules, then copy root-level profiles into reachy_talk_data."""
+        """Build Python modules, then copy root-level profiles into reachy_talk_data_ja."""
         super().run()
 
         target_root = Path(self.build_lib) / TARGET_PACKAGE / TARGET_SUBDIR

@@ -10,18 +10,18 @@ from collections.abc import Sequence, AsyncIterator
 import numpy as np
 import pytest
 
-import reachy_mini_conversation_app.direct_cascade as direct_mod
-from reachy_mini_conversation_app.tools import background_tool_manager
-from reachy_mini_conversation_app.streaming import AdditionalOutputs
-from reachy_mini_conversation_app.direct_cascade import SpeechRequest, DirectCascadeHandler
-from reachy_mini_conversation_app.voice_activity import UtteranceEvent
-from reachy_mini_conversation_app.speech_services import (
+import reachy_mini_conversation_ja.direct_cascade as direct_mod
+from reachy_mini_conversation_ja.tools import background_tool_manager
+from reachy_mini_conversation_ja.streaming import AdditionalOutputs
+from reachy_mini_conversation_ja.direct_cascade import SpeechRequest, DirectCascadeHandler
+from reachy_mini_conversation_ja.voice_activity import UtteranceEvent
+from reachy_mini_conversation_ja.speech_services import (
     ChatEvent,
     TextDelta,
     SpeechServices,
     ToolCallRequest,
 )
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_ja.tools.core_tools import ToolDependencies
 
 
 SAMPLE_RATE = 16000
@@ -428,7 +428,7 @@ async def test_a_turn_reports_where_the_wait_went(monkeypatch: Any, caplog: Any)
         rounds=[[TextDelta("やあ。")]],
     )
 
-    with caplog.at_level("INFO", logger="reachy_mini_conversation_app.direct_cascade"):
+    with caplog.at_level("INFO", logger="reachy_mini_conversation_ja.direct_cascade"):
         async with _running(handler):
             await _say_something(handler)
             await _wait_for(lambda: bool(text_to_speech.spoken))

@@ -182,7 +182,7 @@ See `.env.example` for the full list, including the `DIRECT_VAD_*` thresholds th
 Activate your virtual environment, then launch:
 
 ```bash
-reachy-mini-conversation-app
+reachy-mini-conversation-ja
 ```
 
 > [!TIP]
@@ -203,10 +203,10 @@ The app runs in console mode. Add `--ui` to serve the web interface at http://12
 
 ```bash
 # Audio-only conversation (no camera)
-reachy-mini-conversation-app --no-camera
+reachy-mini-conversation-ja --no-camera
 
 # Launch with the minimal web UI for personality/mic/settings control
-reachy-mini-conversation-app --ui
+reachy-mini-conversation-ja --ui
 ```
 
 ## LLM tools exposed to the assistant
@@ -233,7 +233,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
 
 > [!NOTE]
-> `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
+> `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_ja/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
 
 ## Creating and adding tools
 
@@ -241,7 +241,7 @@ Tools can run locally as Python code or remotely in an MCP-compatible Hugging Fa
 
 ### Local tools
 
-Create one Python module per tool, with the file name matching the tool's unique `name`. See [`idle_do_nothing.py`](src/reachy_mini_conversation_app/tools/idle_do_nothing.py) for a minimal implementation.
+Create one Python module per tool, with the file name matching the tool's unique `name`. See [`idle_do_nothing.py`](src/reachy_mini_conversation_ja/tools/idle_do_nothing.py) for a minimal implementation.
 
 Each tool subclasses `Tool` and defines `name`, a model-facing `description`, an object-shaped JSON Schema in `parameters_schema`, and an async `__call__` method. Use `ToolDependencies` for runtime services, and set `needs_response = False` for actions that should not trigger a spoken follow-up. Catch expected operational failures, log them with the module logger, and return `{"error": "..."}` so the conversation can continue.
 
@@ -291,7 +291,7 @@ You are a concise, friendly robot guide.
 
 `default_tools` is the authored baseline. Tools → Tool access stores overrides in instance-local `profile_toolsets.json` without changing bundled profiles. Restoring defaults removes the override. Active-profile changes reconnect the conversation; other changes apply when selected.
 
-Profile directories are data-only. Python tool implementations belong in `src/reachy_mini_conversation_app/tools/`, or in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` for external tools. Each enabled tool ID must resolve to a shared tool, an external tool, or a tool from an installed Hugging Face Space.
+Profile directories are data-only. Python tool implementations belong in `src/reachy_mini_conversation_ja/tools/`, or in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` for external tools. Each enabled tool ID must resolve to a shared tool, an external tool, or a tool from an installed Hugging Face Space.
 
 See [Creating and adding tools](#creating-and-adding-tools) for the local tool interface and a maintained example.
 
@@ -310,7 +310,7 @@ Switching a personality reloads its prompt and effective tools through a quick b
 <details>
 <summary>Locked profile mode</summary>
 
-To create a locked variant of the app that cannot switch profiles, edit `src/reachy_mini_conversation_app/config.py` and set the `LOCKED_PROFILE` constant to the desired profile name:
+To create a locked variant of the app that cannot switch profiles, edit `src/reachy_mini_conversation_ja/config.py` and set the `LOCKED_PROFILE` constant to the desired profile name:
 ```python
 LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
 ```
@@ -326,7 +326,7 @@ When set, the app ignores saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, 
 You can extend the app with profiles/tools stored outside the repository defaults.
 
 - Core profiles are under `profiles/`.
-- Core tools are under `src/reachy_mini_conversation_app/tools/`.
+- Core tools are under `src/reachy_mini_conversation_ja/tools/`.
 
 Recommended layout:
 
@@ -381,19 +381,19 @@ The app accepts Hugging Face Spaces exposing the standard `/gradio_api/mcp/` end
 
 ```bash
 # install + enable in active profile
-reachy-mini-conversation-app tool-spaces add <owner/space-name>
+reachy-mini-conversation-ja tool-spaces add <owner/space-name>
 
 # enable in a specific profile
-reachy-mini-conversation-app tool-spaces add <owner/space-name> --profile NAME
+reachy-mini-conversation-ja tool-spaces add <owner/space-name> --profile NAME
 
 # install without enabling
-reachy-mini-conversation-app tool-spaces add <owner/space-name> --install-only
+reachy-mini-conversation-ja tool-spaces add <owner/space-name> --install-only
 
 # list installed spaces
-reachy-mini-conversation-app tool-spaces list
+reachy-mini-conversation-ja tool-spaces list
 
 # remove an installed space
-reachy-mini-conversation-app tool-spaces remove owner/space-name
+reachy-mini-conversation-ja tool-spaces remove owner/space-name
 ```
 
 Bundled Pollen Spaces use static specs and are enabled by the default profile. Custom Spaces are validated through the Hugging Face Hub; HF tokens are sent only to private Spaces. Tool metadata is cached in:
@@ -421,7 +421,7 @@ Tags are advisory; installation still requires successful MCP validation.
 If you run multiple Reachy Mini daemons on the same network, use:
 
 ```bash
-reachy-mini-conversation-app --robot-name <name>
+reachy-mini-conversation-ja --robot-name <name>
 ```
 
 `<name>` must match the daemon's `--robot-name` value so the app connects to the correct robot.

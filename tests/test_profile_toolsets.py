@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-import reachy_mini_conversation_app.profile_store as profile_store_mod
-from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.profile_store import write_profile
-from reachy_mini_conversation_app.profile_toolsets import (
+import reachy_mini_conversation_ja.profile_store as profile_store_mod
+from reachy_mini_conversation_ja.config import config
+from reachy_mini_conversation_ja.profile_store import write_profile
+from reachy_mini_conversation_ja.profile_toolsets import (
     enable_profile_tools,
     read_profile_toolsets,
     read_profile_tool_names,
@@ -111,7 +111,7 @@ def test_enabling_tools_does_not_overwrite_a_concurrent_profile_save(
         profile_save_started.set()
         write_profile_tool_override("guide", ["camera"], instance_path)
 
-    monkeypatch.setattr("reachy_mini_conversation_app.profile_toolsets.read_profile_tool_names", paused_read)
+    monkeypatch.setattr("reachy_mini_conversation_ja.profile_toolsets.read_profile_tool_names", paused_read)
     with ThreadPoolExecutor(max_workers=2) as executor:
         enable_future = executor.submit(enable_profile_tools, "guide", ["new_space__search"], instance_path)
         assert enable_read.wait(timeout=1.0)

@@ -8,20 +8,20 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-import reachy_mini_conversation_app.config as config_mod
-from reachy_mini_conversation_app.profile_store import write_profile
+import reachy_mini_conversation_ja.config as config_mod
+from reachy_mini_conversation_ja.profile_store import write_profile
 
 
 def _reload_core_tools() -> ModuleType:
     """Reload core_tools after config object has been patched."""
     for module_name in list(sys.modules):
         if module_name.startswith(
-            ("reachy_mini_conversation_app.tools.", "reachy_mini_conversation_app._external_tools.")
+            ("reachy_mini_conversation_ja.tools.", "reachy_mini_conversation_ja._external_tools.")
         ):
             sys.modules.pop(module_name, None)
 
-    sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
-    core_tools_mod = importlib.import_module("reachy_mini_conversation_app.tools.core_tools")
+    sys.modules.pop("reachy_mini_conversation_ja.tools.core_tools", None)
+    core_tools_mod = importlib.import_module("reachy_mini_conversation_ja.tools.core_tools")
     core_tools_mod.initialize_tools()
     return core_tools_mod
 
@@ -91,7 +91,7 @@ def test_external_tools_can_be_loaded_without_external_profile(
         "\n".join(
             [
                 "from typing import Any, Dict",
-                "from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies",
+                "from reachy_mini_conversation_ja.tools.core_tools import Tool, ToolDependencies",
                 "",
                 "class ExtPingTool(Tool):",
                 '    name = "ext_ping"',
@@ -116,7 +116,7 @@ def test_external_tools_can_be_loaded_without_external_profile(
 
     assert sys.modules["json"] is json
     assert "ext_ping" in core_tools_mod.ALL_TOOLS
-    assert "reachy_mini_conversation_app._external_tools.json" in sys.modules
+    assert "reachy_mini_conversation_ja._external_tools.json" in sys.modules
 
 
 def test_external_tools_fail_on_duplicate_tool_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,7 +127,7 @@ def test_external_tools_fail_on_duplicate_tool_names(tmp_path: Path, monkeypatch
     duplicate_tool_source = "\n".join(
         [
             "from typing import Any, Dict",
-            "from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies",
+            "from reachy_mini_conversation_ja.tools.core_tools import Tool, ToolDependencies",
             "",
             "class DupTool(Tool):",
             '    name = "dup_tool"',

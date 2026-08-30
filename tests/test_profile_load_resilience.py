@@ -13,19 +13,19 @@ from pathlib import Path
 
 import pytest
 
-import reachy_mini_conversation_app.config as config_mod
-from reachy_mini_conversation_app import app_lifecycle
-from reachy_mini_conversation_app.profile_store import write_profile
+import reachy_mini_conversation_ja.config as config_mod
+from reachy_mini_conversation_ja import app_lifecycle
+from reachy_mini_conversation_ja.profile_store import write_profile
 
 
 def _reset_core_tools() -> None:
     """Drop the cached tool registry so each case reloads from its profile."""
     for module_name in list(sys.modules):
         if module_name.startswith(
-            ("reachy_mini_conversation_app.tools.", "reachy_mini_conversation_app._external_tools.")
+            ("reachy_mini_conversation_ja.tools.", "reachy_mini_conversation_ja._external_tools.")
         ):
             sys.modules.pop(module_name, None)
-    sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
+    sys.modules.pop("reachy_mini_conversation_ja.tools.core_tools", None)
     importlib.reload(app_lifecycle)
 
 
@@ -63,7 +63,7 @@ def test_legacy_user_profile_is_migrated_and_kept(
     assert config_mod.config.REACHY_MINI_CUSTOM_PROFILE == "user_personalities/legacy_profile"
     assert (legacy_profile / "profile.md").is_file()
 
-    from reachy_mini_conversation_app.tools import core_tools
+    from reachy_mini_conversation_ja.tools import core_tools
 
     assert core_tools.ALL_TOOLS
 
@@ -83,7 +83,7 @@ def test_malformed_profile_document_falls_back_to_default(
     abandoned = app_lifecycle.initialize_tools_with_default_fallback(None, logging.getLogger(__name__))
 
     assert abandoned == "broken_profile"
-    from reachy_mini_conversation_app.tools import core_tools
+    from reachy_mini_conversation_ja.tools import core_tools
 
     assert core_tools.ALL_TOOLS
 
@@ -103,7 +103,7 @@ def test_readable_profile_is_left_alone(
 
     assert abandoned is None
     assert config_mod.config.REACHY_MINI_CUSTOM_PROFILE == "good_profile"
-    from reachy_mini_conversation_app.tools import core_tools
+    from reachy_mini_conversation_ja.tools import core_tools
 
     assert "dance" in core_tools.ALL_TOOLS
 

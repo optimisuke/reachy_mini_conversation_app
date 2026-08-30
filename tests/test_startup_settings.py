@@ -1,6 +1,6 @@
 """Tests for persisted instance-local startup settings."""
 
-from reachy_mini_conversation_app.startup_settings import (
+from reachy_mini_conversation_ja.startup_settings import (
     StartupSettings,
     read_startup_settings,
     write_startup_settings,
@@ -21,7 +21,7 @@ def test_load_startup_settings_into_runtime_applies_profile_when_no_env(monkeypa
     applied_profiles: list[str | None] = []
     monkeypatch.delenv("REACHY_MINI_CUSTOM_PROFILE", raising=False)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.config.set_custom_profile",
+        "reachy_mini_conversation_ja.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),
     )
 
@@ -37,7 +37,7 @@ def test_load_startup_settings_into_runtime_saved_settings_override_instance_env
     applied_profiles: list[str | None] = []
     monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.config.set_custom_profile",
+        "reachy_mini_conversation_ja.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),
     )
 
@@ -53,7 +53,7 @@ def test_load_startup_settings_into_runtime_saved_settings_override_inherited_en
     applied_profiles: list[str | None] = []
     monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.config.set_custom_profile",
+        "reachy_mini_conversation_ja.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),
     )
 
@@ -70,7 +70,7 @@ def test_load_startup_settings_into_runtime_preserves_inherited_env_without_save
     applied_profiles: list[str | None] = []
     monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.config.set_custom_profile",
+        "reachy_mini_conversation_ja.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),
     )
 

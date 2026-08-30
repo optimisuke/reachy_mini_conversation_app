@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
+from reachy_mini_conversation_ja.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_ja.tools.go_to_sleep import GoToSleep
 
 
 def test_go_to_sleep_has_no_required_arguments() -> None:

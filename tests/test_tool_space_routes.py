@@ -11,21 +11,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
-from reachy_mini_conversation_app.tool_spaces import (
+from reachy_mini_conversation_ja.config import DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_ja.tool_spaces import (
     InstalledToolSpace,
     InstalledToolSpaceTool,
     InstalledToolSpacesManifest,
     read_installed_tool_spaces,
     write_installed_tool_spaces,
 )
-from reachy_mini_conversation_app.profile_store import write_profile
-from reachy_mini_conversation_app.profile_toolsets import (
+from reachy_mini_conversation_ja.profile_store import write_profile
+from reachy_mini_conversation_ja.profile_toolsets import (
     read_profile_tool_names,
     read_profile_tool_override,
 )
-from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
-from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
+from reachy_mini_conversation_ja.tool_space_routes import register_tool_space_methods
+from reachy_mini_conversation_ja.profile_tool_routes import register_profile_tool_methods
 
 
 SPACE_SLUG = "example/search-tool"
@@ -63,10 +63,10 @@ def _configure_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tupl
     write_installed_tool_spaces(instance_path, InstalledToolSpacesManifest(spaces=[]))
     monkeypatch.setattr(config, "INSTANCE_PATH", instance_path)
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", profiles_root)
-    monkeypatch.setattr("reachy_mini_conversation_app.profile_store.DEFAULT_PROFILES_DIRECTORY", profiles_root)
+    monkeypatch.setattr("reachy_mini_conversation_ja.profile_store.DEFAULT_PROFILES_DIRECTORY", profiles_root)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.resolve_tool_space_sync",
+        "reachy_mini_conversation_ja.tool_spaces.resolve_tool_space_sync",
         lambda slug: _resolved_space(),
     )
     return instance_path, profiles_root
@@ -110,7 +110,7 @@ def test_web_install_adds_global_inventory_without_enabling_a_profile(
     instance_path, profiles_root = _configure_profiles(tmp_path, monkeypatch)
     default_profile_text = (profiles_root / "default" / "profile.md").read_text(encoding="utf-8")
     initialize_tools = MagicMock()
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_settings.initialize_tools", initialize_tools)
     restart_conversation = AsyncMock()
     client = _mount_rpc(instance_path, MagicMock(return_value=None), restart_conversation)
 
@@ -162,7 +162,7 @@ def test_profile_tools_save_and_reset_control_one_profile(
     instance_path, profiles_root = _configure_profiles(tmp_path, monkeypatch)
     guide_profile_text = (profiles_root / "guide" / "profile.md").read_text(encoding="utf-8")
     initialize_tools = MagicMock()
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_settings.initialize_tools", initialize_tools)
     client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
     assert "result" in _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
 
@@ -199,7 +199,7 @@ def test_remove_tool_space_disables_its_tools_in_every_profile(
     """Removing a Space should clean its tool IDs from every profile selection."""
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
     initialize_tools = MagicMock()
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_settings.initialize_tools", initialize_tools)
     client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
     assert "result" in _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
     assert "result" in _rpc_call(
@@ -248,8 +248,8 @@ def test_locked_mode_exposes_inventory_but_rejects_tool_edits(
 ) -> None:
     """Locked variants should keep tool settings visible and make every mutation read-only."""
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_space_routes.LOCKED_PROFILE", "default")
-    monkeypatch.setattr("reachy_mini_conversation_app.profile_tool_routes.LOCKED_PROFILE", "default")
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_space_routes.LOCKED_PROFILE", "default")
+    monkeypatch.setattr("reachy_mini_conversation_ja.profile_tool_routes.LOCKED_PROFILE", "default")
     client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
 
     assert _rpc_call(client, "tool_spaces.list")["result"]["editable"] is False
@@ -271,7 +271,7 @@ def test_active_profile_tool_update_restarts_a_running_conversation(
 ) -> None:
     """Changing active profile tools should reconnect the running conversation."""
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", MagicMock())
+    monkeypatch.setattr("reachy_mini_conversation_ja.tool_settings.initialize_tools", MagicMock())
     conversation_loop = asyncio.new_event_loop()
     loop_thread = threading.Thread(target=conversation_loop.run_forever)
     loop_thread.start()
@@ -321,7 +321,7 @@ def test_saved_tool_change_reports_success_when_runtime_reload_fails(
     """A persisted selection should not be reported as a failed save when live reload fails."""
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_settings.initialize_tools",
+        "reachy_mini_conversation_ja.tool_settings.initialize_tools",
         MagicMock(side_effect=RuntimeError("reload failed")),
     )
     client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())

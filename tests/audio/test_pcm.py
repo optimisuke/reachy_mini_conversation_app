@@ -5,7 +5,7 @@ import wave
 
 import numpy as np
 
-from reachy_mini_conversation_app.audio.pcm import resample, decode_pcm, encode_wav
+from reachy_mini_conversation_ja.audio.pcm import resample, decode_pcm, encode_wav
 
 
 def test_encode_wav_round_trips_mono_samples() -> None:
