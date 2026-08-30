@@ -116,3 +116,25 @@ def test_vision_is_off_unless_asked_for(monkeypatch) -> None:
     monkeypatch.setenv("DIRECT_LLM_VISION", "1")
 
     assert config.get_direct_backend_settings().llm_vision is True
+
+
+def test_location_settings_are_unset_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing is claimed about where the robot is until it is configured."""
+    monkeypatch.delenv(config.LOCATION_TIMEZONE_ENV, raising=False)
+    monkeypatch.delenv(config.LOCATION_PLACE_ENV, raising=False)
+
+    settings = config.get_location_settings()
+
+    assert settings.timezone is None
+    assert settings.place is None
+
+
+def test_location_settings_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured place and timezone are surfaced, trimmed."""
+    monkeypatch.setenv(config.LOCATION_TIMEZONE_ENV, "  Asia/Tokyo ")
+    monkeypatch.setenv(config.LOCATION_PLACE_ENV, "Kobe, Japan")
+
+    settings = config.get_location_settings()
+
+    assert settings.timezone == "Asia/Tokyo"
+    assert settings.place == "Kobe, Japan"

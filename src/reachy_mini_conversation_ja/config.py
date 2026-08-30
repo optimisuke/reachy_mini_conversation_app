@@ -76,6 +76,31 @@ CONVERSATION_BACKEND_ENV = "CONVERSATION_BACKEND"
 DIRECT_BACKEND = "direct"
 OPENAI_REALTIME_BACKEND = "openai_realtime"
 
+# Where the robot stands. The remote weather and time tools have no idea, so without
+# these the time tool answers in UTC and the weather tool asks which city it should
+# look up. Both are plain text handed to the model, not validated here: the timezone
+# has to be an IANA name the time tool accepts, and the location has to be a place
+# name its geocoder can find (a broad "Kobe, Japan" resolves where a narrow
+# "兵庫県神戸市灘区" does not).
+LOCATION_TIMEZONE_ENV = "CONVERSATION_TIMEZONE"
+LOCATION_PLACE_ENV = "CONVERSATION_LOCATION"
+
+
+@dataclass(frozen=True)
+class LocationSettings:
+    """The robot's timezone and place, for tools that cannot work them out."""
+
+    timezone: str | None
+    place: str | None
+
+
+def get_location_settings() -> LocationSettings:
+    """Return the configured timezone and place, either of which may be unset."""
+    return LocationSettings(
+        timezone=_optional_env_text(LOCATION_TIMEZONE_ENV),
+        place=_optional_env_text(LOCATION_PLACE_ENV),
+    )
+
 
 @dataclass(frozen=True)
 class HFBackendDefaults:
