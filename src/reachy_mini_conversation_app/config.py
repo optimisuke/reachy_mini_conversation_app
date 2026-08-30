@@ -97,7 +97,7 @@ HF_DEFAULTS = HFBackendDefaults()
 class DirectBackendDefaults:
     """Defaults for the direct backend's speech and language endpoints."""
 
-    stt_model: str = "gpt-4o-transcribe"
+    stt_model: str = "gpt-transcribe"
     llm_model: str = "Qwen/Qwen3-4B-Instruct-2507"
     llm_base_url: str = "https://router.huggingface.co/v1"
     tts_model: str = "gpt-4o-mini-tts"

@@ -162,7 +162,7 @@ REALTIME_TRANSCRIPTION_LANGUAGE=ja
 REACHY_MINI_CUSTOM_PROFILE=default_ja
 ```
 
-Defaults: OpenAI `gpt-4o-transcribe` for speech-to-text, `Qwen/Qwen3-4B-Instruct-2507` through the Hugging Face router for the language model, and OpenAI `gpt-4o-mini-tts` for speech. The speech stages use `OPENAI_API_KEY` and the language model uses `HF_TOKEN`, each overridable per stage; a stage pointed at another provider falls back to whichever key is configured. Tools, personalities, memory, the web UI and the voice catalog all behave as they do on the realtime backend; voices are mapped onto the provider's own.
+Defaults: OpenAI `gpt-transcribe` for speech-to-text, `Qwen/Qwen3-4B-Instruct-2507` through the Hugging Face router for the language model, and OpenAI `gpt-4o-mini-tts` for speech. The speech stages use `OPENAI_API_KEY` and the language model uses `HF_TOKEN`, each overridable per stage; a stage pointed at another provider falls back to whichever key is configured. Tools, personalities, memory, the web UI and the voice catalog all behave as they do on the realtime backend; voices are mapped onto the provider's own.
 
 Every stage speaks the OpenAI HTTP API, so each one can be pointed elsewhere — a local Kokoro speech server, for instance — without code changes:
 
