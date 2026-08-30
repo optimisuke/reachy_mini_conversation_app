@@ -443,6 +443,8 @@ async def test_a_turn_reports_where_the_wait_went(monkeypatch: Any, caplog: Any)
 @pytest.mark.asyncio
 async def test_a_new_question_drops_the_answer_to_the_last_one(monkeypatch: Any) -> None:
     """Queued speech from a past turn must not delay the answer the user is waiting for."""
+    # Only reachable when the microphone stays live while Reachy talks.
+    monkeypatch.setenv("DIRECT_VAD_BARGE_IN", "1")
     handler, _stt, _chat, text_to_speech = _make_handler(
         monkeypatch,
         transcripts=["ひとつめ", "ふたつめ"],
