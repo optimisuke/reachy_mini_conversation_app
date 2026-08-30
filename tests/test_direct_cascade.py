@@ -417,3 +417,24 @@ async def test_a_vision_model_is_shown_the_camera_image(monkeypatch: Any) -> Non
         for part in message["content"]
     ]
     assert image_parts == [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,SkZJRg=="}}]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_reports_where_the_wait_went(monkeypatch: Any, caplog: Any) -> None:
+    """Each turn logs one line attributing the wait to a stage, so it can be tuned."""
+    handler, _stt, _chat, text_to_speech = _make_handler(
+        monkeypatch,
+        transcripts=["こんにちは"],
+        rounds=[[TextDelta("やあ。")]],
+    )
+
+    with caplog.at_level("INFO", logger="reachy_mini_conversation_app.direct_cascade"):
+        async with _running(handler):
+            await _say_something(handler)
+            await _wait_for(lambda: bool(text_to_speech.spoken))
+            await _wait_for(lambda: any("Turn timing" in record.message for record in caplog.records))
+
+    timing = next(record.getMessage() for record in caplog.records if "Turn timing" in record.message)
+    for stage in ("silence", "stt", "answer", "speech"):
+        assert stage in timing
+    assert "to first audio" in timing

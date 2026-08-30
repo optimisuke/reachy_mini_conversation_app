@@ -75,6 +75,17 @@ _PLAYBACK_LEAD_S: Final[float] = 0.2
 _SPEAKING_TAIL_S: Final[float] = 0.4
 
 
+@dataclass
+class TurnTiming:
+    """When each stage of one turn finished, so the wait can be attributed to a stage."""
+
+    speech_ended_at: float
+    utterance_at: float
+    transcribed_at: float | None = None
+    first_sentence_at: float | None = None
+    first_audio_at: float | None = None
+
+
 @dataclass(frozen=True)
 class ToolOutcome:
     """What one finished tool gives the model: its output, plus any captured image."""
@@ -115,7 +126,7 @@ class DirectCascadeHandler(ConversationHandler):
         self._llm_vision = False
         self._assistant_speaking = False
         self._playback_ends_at = 0.0
-        self._turn_user_done_at: float | None = None
+        self._turn_timing: TurnTiming | None = None
 
     def _is_connected(self) -> bool:
         """Return whether a session is serving audio."""
@@ -218,6 +229,11 @@ class DirectCascadeHandler(ConversationHandler):
         self._mark_activity("user_speech_stopped")
         self.deps.movement_manager.set_listening(False)
         logger.debug("Utterance captured: %.2fs", utterance.size / self.SAMPLE_RATE)
+        now = time.monotonic()
+        self._turn_timing = TurnTiming(
+            speech_ended_at=now - get_speech_detection_settings().silence_end_s,
+            utterance_at=now,
+        )
         await self._cancel_active_turn()
         self._start_turn(self._run_turn(utterance), name="direct-turn")
 
@@ -253,7 +269,8 @@ class DirectCascadeHandler(ConversationHandler):
             logger.debug("Ignoring empty user transcript")
             return
 
-        self._turn_user_done_at = time.perf_counter()
+        if self._turn_timing is not None:
+            self._turn_timing.transcribed_at = time.monotonic()
         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
         self._emit_transcript("user", transcript, True)
 
@@ -295,12 +312,14 @@ class DirectCascadeHandler(ConversationHandler):
             if isinstance(event, TextDelta):
                 spoken_text.append(event.text)
                 for sentence in sentences.push(event.text):
+                    self._mark_first_sentence()
                     await self._speech_queue.put((sentence, voice))
                 continue
             tool_calls.append(event)
 
         remainder = sentences.flush()
         if remainder:
+            self._mark_first_sentence()
             await self._speech_queue.put((remainder, voice))
 
         text = "".join(spoken_text).strip()
@@ -308,11 +327,6 @@ class DirectCascadeHandler(ConversationHandler):
             self._messages.append(self._assistant_message(text, tool_calls))
         if text:
             self._mark_activity("assistant_transcript_done")
-            if self._turn_user_done_at is not None:
-                logger.info(
-                    "Turn latency: assistant text %.0f ms after user speech",
-                    (time.perf_counter() - self._turn_user_done_at) * 1000,
-                )
             await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": text}))
             self._emit_transcript("assistant", text, True)
         return text, tool_calls
@@ -437,6 +451,31 @@ class DirectCascadeHandler(ConversationHandler):
             image_b64 = completed_tool.result.get("b64_im") if isinstance(completed_tool.result, dict) else None
             future.set_result(ToolOutcome(output, image_b64 if isinstance(image_b64, str) else None))
 
+    def _mark_first_sentence(self) -> None:
+        """Record when the first speakable piece of this turn's answer was ready."""
+        timing = self._turn_timing
+        if timing is not None and timing.first_sentence_at is None:
+            timing.first_sentence_at = time.monotonic()
+
+    def _report_turn_timing(self) -> None:
+        """Log where the wait between the user finishing and Reachy speaking went."""
+        timing = self._turn_timing
+        if timing is None or timing.first_audio_at is None:
+            return
+        self._turn_timing = None
+
+        stages = [("silence", timing.speech_ended_at, timing.utterance_at)]
+        if timing.transcribed_at is not None:
+            stages.append(("stt", timing.utterance_at, timing.transcribed_at))
+            if timing.first_sentence_at is not None:
+                stages.append(("answer", timing.transcribed_at, timing.first_sentence_at))
+                stages.append(("speech", timing.first_sentence_at, timing.first_audio_at))
+        logger.info(
+            "Turn timing: %s = %.0f ms to first audio",
+            " + ".join(f"{name} {(end - start) * 1000:.0f}" for name, start, end in stages),
+            (timing.first_audio_at - timing.speech_ended_at) * 1000,
+        )
+
     def _trim_history(self) -> None:
         """Bound the history, keeping the system message and whole recent turns."""
         if len(self._messages) <= _MAX_HISTORY_MESSAGES:
@@ -500,6 +539,10 @@ class DirectCascadeHandler(ConversationHandler):
         """Hand one block of audio to the player and extend the expected playback end."""
         if pcm.size == 0:
             return False
+        timing = self._turn_timing
+        if timing is not None and timing.first_audio_at is None:
+            timing.first_audio_at = time.monotonic()
+            self._report_turn_timing()
         for start in range(0, pcm.size, _PLAYBACK_CHUNK_SAMPLES):
             self._mark_activity("assistant_audio_delta")
             await self.output_queue.put(
