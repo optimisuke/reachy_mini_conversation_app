@@ -296,6 +296,9 @@ class DirectCascadeHandler(ConversationHandler):
             utterance_at=now,
         )
         await self._cancel_active_turn()
+        # Whatever was still queued answers a question the user has moved past, and
+        # speaking it first would push this turn's answer seconds into the future.
+        await self._stop_speaking()
         self._start_turn(self._run_turn(utterance, voiced_windows), name="direct-turn")
 
     def _start_turn(self, turn: Coroutine[Any, Any, None], name: str) -> None:

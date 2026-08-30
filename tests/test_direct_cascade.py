@@ -13,7 +13,7 @@ import pytest
 import reachy_mini_conversation_app.direct_cascade as direct_mod
 from reachy_mini_conversation_app.tools import background_tool_manager
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
-from reachy_mini_conversation_app.direct_cascade import DirectCascadeHandler
+from reachy_mini_conversation_app.direct_cascade import SpeechRequest, DirectCascadeHandler
 from reachy_mini_conversation_app.voice_activity import UtteranceEvent
 from reachy_mini_conversation_app.speech_services import (
     ChatEvent,
@@ -438,3 +438,26 @@ async def test_a_turn_reports_where_the_wait_went(monkeypatch: Any, caplog: Any)
     for stage in ("silence", "stt", "answer", "speech"):
         assert stage in timing
     assert "to first audio" in timing
+
+
+@pytest.mark.asyncio
+async def test_a_new_question_drops_the_answer_to_the_last_one(monkeypatch: Any) -> None:
+    """Queued speech from a past turn must not delay the answer the user is waiting for."""
+    handler, _stt, _chat, text_to_speech = _make_handler(
+        monkeypatch,
+        transcripts=["ひとつめ", "ふたつめ"],
+        rounds=[[TextDelta("古い答え。")], [TextDelta("新しい答え。")]],
+    )
+    flushes: list[bool] = []
+    handler._clear_queue = lambda: flushes.append(True)
+
+    async with _running(handler):
+        await _say_something(handler)
+        await _wait_for(lambda: text_to_speech.spoken == [("古い答え。", PROFILE_VOICE)])
+        # Ask again while the first answer is still on its way to the speaker.
+        handler._speech_queue.put_nowait(SpeechRequest("積み残し。", PROFILE_VOICE, None))
+        await _say_something(handler)
+        await _wait_for(lambda: ("新しい答え。", PROFILE_VOICE) in text_to_speech.spoken)
+
+    assert flushes, "the player should have been flushed for the new turn"
+    assert ("積み残し。", PROFILE_VOICE) not in text_to_speech.spoken
