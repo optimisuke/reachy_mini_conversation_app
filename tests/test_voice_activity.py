@@ -112,8 +112,8 @@ def test_long_speech_is_cut_at_the_maximum_length() -> None:
 
 
 def test_reachy_talking_raises_the_trigger() -> None:
-    """While Reachy speaks, only a clearly louder voice should interrupt it."""
-    segmenter = _segmenter()
+    """With barge-in turned back on, only a clearly louder voice interrupts Reachy."""
+    segmenter = _segmenter(barge_in_enabled=True)
     segmenter.push(_silence(1.0))
     segmenter.set_assistant_speaking(True)
 

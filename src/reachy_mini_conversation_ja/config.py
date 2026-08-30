@@ -599,9 +599,12 @@ class SpeechDetectionSettings:
     # durations are set where household noise mostly falls below them.
     min_level: float = 0.010
     barge_in_min_level: float = 0.018
-    # Off means the microphone is ignored entirely while Reachy talks: it can never
-    # answer its own echo, and it can never be interrupted either.
-    barge_in_enabled: bool = True
+    # The speaker sits next to the microphone, and on this robot Reachy's own voice
+    # clears even six times the noise floor, so it gets transcribed and answered and
+    # the conversation loops on itself. Ignoring the microphone while it talks costs
+    # the ability to interrupt, which is the smaller loss. Set DIRECT_VAD_BARGE_IN=1
+    # to trade back.
+    barge_in_enabled: bool = False
     speech_start_ratio: float = 3.5
     barge_in_ratio: float = 6.0
     speech_start_s: float = 0.15
