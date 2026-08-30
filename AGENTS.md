@@ -11,6 +11,12 @@ This is a small project maintained by a small team. Low-quality, auto-generated,
 
 ## Read this first
 
+0. **Never call the daemon's `POST /cache/reset-apps` on a robot.** Despite the name it does not clear a
+   cache: it deletes `/venvs/apps_venv` outright, taking every installed app with it, along with each app's
+   instance directory - the `.env` holding your API keys, `memory.v1.json`, `startup_settings.json`. The
+   daemon does not rebuild the venv on restart, so recovery is manual: create it with the Python 3.12 that
+   `/venvs/mini_daemon/pyvenv.cfg` points at, install `reachy-mini`, install this app, and put the instance
+   files back. Verify what a daemon endpoint does before calling it; a name is not a specification.
 1. **Read before you write.** Match the existing structure, naming, and patterns of the module you touch.
 2. **Don't touch** `.github/pull_request_template.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, or CI workflows, unless that *is* the task.
 3. **Minimal diff. One PR = one fix/feature.** Prefer deleting code to adding it.
