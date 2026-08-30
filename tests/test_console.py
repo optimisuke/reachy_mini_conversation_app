@@ -856,3 +856,52 @@ def test_rpc_settings_methods() -> None:
     assert isinstance(r2["result"], list)
     assert "spaces" in r3["result"]
     assert "enabled_tools" in r4["result"]
+
+
+@pytest.mark.asyncio
+async def test_record_loop_waits_when_the_microphone_has_nothing() -> None:
+    """Polling the recorder flat out starves the handler's network calls on the same loop."""
+    polls = 0
+
+    def get_audio_sample() -> None:
+        nonlocal polls
+        polls += 1
+        return None
+
+    media = SimpleNamespace(
+        audio=None,
+        backend=None,
+        get_audio_sample=get_audio_sample,
+        get_input_audio_samplerate=lambda: 16000,
+    )
+    stream = LocalStream(MagicMock(), SimpleNamespace(media=media))
+
+    loop_task = asyncio.create_task(stream.record_loop())
+    await asyncio.sleep(0.1)
+    stream._stop_event.set()
+    await asyncio.wait_for(loop_task, timeout=1.0)
+
+    # At one poll per 5 ms this is ~20; spinning would run into the thousands.
+    assert polls < 200
+
+
+@pytest.mark.asyncio
+async def test_record_loop_forwards_frames_back_to_back() -> None:
+    """While the recorder has audio, frames go straight through without waiting."""
+    frames = [np.zeros((160, 2), dtype=np.float32) for _ in range(3)]
+    handler = MagicMock()
+    handler.receive = AsyncMock()
+    media = SimpleNamespace(
+        audio=None,
+        backend=None,
+        get_audio_sample=lambda: frames.pop(0) if frames else None,
+        get_input_audio_samplerate=lambda: 16000,
+    )
+    stream = LocalStream(handler, SimpleNamespace(media=media))
+
+    loop_task = asyncio.create_task(stream.record_loop())
+    await _wait_until(lambda: handler.receive.await_count == 3, timeout=1.0)
+    stream._stop_event.set()
+    await asyncio.wait_for(loop_task, timeout=1.0)
+
+    assert handler.receive.await_count == 3

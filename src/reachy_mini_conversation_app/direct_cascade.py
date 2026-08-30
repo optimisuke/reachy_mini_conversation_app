@@ -75,6 +75,15 @@ _PLAYBACK_LEAD_S: Final[float] = 0.2
 _SPEAKING_TAIL_S: Final[float] = 0.4
 
 
+@dataclass(frozen=True)
+class SpeechRequest:
+    """One sentence to speak, with the timing of the turn that produced it."""
+
+    text: str
+    voice: str
+    timing: "TurnTiming | None"
+
+
 @dataclass
 class TurnTiming:
     """When each stage of one turn finished, so the wait can be attributed to a stage."""
@@ -122,7 +131,7 @@ class DirectCascadeHandler(ConversationHandler):
         self._stopped = asyncio.Event()
         self._turn_task: asyncio.Task[None] | None = None
         self._speech_task: asyncio.Task[None] | None = None
-        self._speech_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        self._speech_queue: asyncio.Queue[SpeechRequest] = asyncio.Queue()
         self._pending_tool_results: dict[str, asyncio.Future[ToolOutcome]] = {}
         self._guessed_transcription: tuple[int, asyncio.Task[str]] | None = None
         self._llm_vision = False
@@ -366,14 +375,14 @@ class DirectCascadeHandler(ConversationHandler):
                 spoken_text.append(event.text)
                 for sentence in sentences.push(event.text):
                     self._mark_first_sentence()
-                    await self._speech_queue.put((sentence, voice))
+                    await self._speech_queue.put(SpeechRequest(sentence, voice, self._turn_timing))
                 continue
             tool_calls.append(event)
 
         remainder = sentences.flush()
         if remainder:
             self._mark_first_sentence()
-            await self._speech_queue.put((remainder, voice))
+            await self._speech_queue.put(SpeechRequest(remainder, voice, self._turn_timing))
 
         text = "".join(spoken_text).strip()
         if not tool_calls:
@@ -510,12 +519,11 @@ class DirectCascadeHandler(ConversationHandler):
         if timing is not None and timing.first_sentence_at is None:
             timing.first_sentence_at = time.monotonic()
 
-    def _report_turn_timing(self) -> None:
+    @staticmethod
+    def _report_turn_timing(timing: TurnTiming) -> None:
         """Log where the wait between the user finishing and Reachy speaking went."""
-        timing = self._turn_timing
-        if timing is None or timing.first_audio_at is None:
+        if timing.first_audio_at is None:
             return
-        self._turn_timing = None
 
         stages = [("silence", timing.speech_ended_at, timing.utterance_at)]
         if timing.transcribed_at is not None:
@@ -560,24 +568,24 @@ class DirectCascadeHandler(ConversationHandler):
     async def _speech_loop(self) -> None:
         """Speak queued sentences one at a time, starting each as it is synthesized."""
         while True:
-            sentence, voice = await self._speech_queue.get()
+            request = await self._speech_queue.get()
             services = self._services
             if services is None:
                 continue
             try:
-                await self._speak(services, sentence, voice)
+                await self._speak(services, request)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.error("Speech synthesis failed: %s", e)
 
-    async def _speak(self, services: SpeechServices, sentence: str, voice: str) -> None:
+    async def _speak(self, services: SpeechServices, request: SpeechRequest) -> None:
         """Stream one sentence to the player, then wait out the audio already queued."""
         resampler = StreamingResampler(services.text_to_speech.sample_rate, self.SAMPLE_RATE)
         self._set_speaking(True)
         spoken = False
-        async for block in services.text_to_speech.stream(sentence, voice):
-            spoken = await self._queue_audio(resampler.process(block)) or spoken
+        async for block in services.text_to_speech.stream(request.text, request.voice):
+            spoken = await self._queue_audio(resampler.process(block), request.timing) or spoken
         if not spoken:
             return
 
@@ -590,14 +598,13 @@ class DirectCascadeHandler(ConversationHandler):
         if self._speech_queue.empty():
             self._set_speaking(False)
 
-    async def _queue_audio(self, pcm: NDArray[np.int16]) -> bool:
+    async def _queue_audio(self, pcm: NDArray[np.int16], timing: TurnTiming | None) -> bool:
         """Hand one block of audio to the player and extend the expected playback end."""
         if pcm.size == 0:
             return False
-        timing = self._turn_timing
         if timing is not None and timing.first_audio_at is None:
             timing.first_audio_at = time.monotonic()
-            self._report_turn_timing()
+            self._report_turn_timing(timing)
         for start in range(0, pcm.size, _PLAYBACK_CHUNK_SAMPLES):
             self._mark_activity("assistant_audio_delta")
             await self.output_queue.put(
@@ -650,7 +657,7 @@ class DirectCascadeHandler(ConversationHandler):
         self._messages.append(ChatCompletionAssistantMessageParam(role="assistant", content=text))
         await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": text}))
         self._emit_transcript("assistant", text, True)
-        await self._speech_queue.put((text, self.get_current_voice()))
+        await self._speech_queue.put(SpeechRequest(text, self.get_current_voice(), None))
 
     async def _send_startup_greeting(self) -> None:
         """Let the model open the conversation, as the realtime backend does."""

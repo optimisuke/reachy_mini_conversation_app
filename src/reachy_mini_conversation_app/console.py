@@ -96,6 +96,10 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
+# The recorder hands over roughly 20 ms of audio at a time and returns nothing in
+# between, so wait a little before asking again. Spinning instead starves the
+# handler's own network calls on the same event loop.
+MIC_IDLE_POLL_SECONDS = 0.005
 
 
 class LocalStream:
@@ -878,10 +882,12 @@ class LocalStream:
 
         while not self._stop_event.is_set():
             audio_frame = self._robot.media.get_audio_sample()
-            if audio_frame is not None and not self._mic_muted:
+            if audio_frame is None:
+                await asyncio.sleep(MIC_IDLE_POLL_SECONDS)
+                continue
+            if not self._mic_muted:
                 await self.handler.receive((input_sample_rate, audio_frame))
                 self._emit_level("user", audio_frame)
-            await asyncio.sleep(0)  # avoid busy loop
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
