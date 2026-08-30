@@ -560,7 +560,9 @@ def get_direct_backend_settings() -> DirectBackendSettings:
         stt_language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
         llm_model=_env_text("DIRECT_LLM_MODEL", DIRECT_DEFAULTS.llm_model),
         llm_base_url=_env_text("DIRECT_LLM_BASE_URL", DIRECT_DEFAULTS.llm_base_url),
-        llm_api_key=_env_text("DIRECT_LLM_API_KEY", (config.HF_TOKEN or "").strip()),
+        # The language model defaults to the Hugging Face router, so HF_TOKEN comes
+        # first, but a stage pointed elsewhere should still find a configured key.
+        llm_api_key=_env_text("DIRECT_LLM_API_KEY", (config.HF_TOKEN or "").strip() or openai_api_key),
         tts_model=_env_text("DIRECT_TTS_MODEL", DIRECT_DEFAULTS.tts_model),
         tts_base_url=_optional_env_text("DIRECT_TTS_BASE_URL"),
         tts_api_key=_env_text("DIRECT_TTS_API_KEY", openai_api_key),

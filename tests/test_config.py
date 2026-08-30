@@ -90,3 +90,18 @@ def test_resolve_available_voice_normalizes_and_falls_back() -> None:
     assert config.resolve_available_voice("ono_anna", source="test") == "Ono_Anna"
     assert config.resolve_available_voice("nope", source="test", fallback="Aiden") == "Aiden"
     assert config.resolve_available_voice("", source="test") is None
+
+
+def test_language_model_key_falls_back_across_providers(monkeypatch) -> None:
+    """A language model pointed away from Hugging Face should still find a configured key."""
+    monkeypatch.delenv("DIRECT_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    config.refresh_runtime_config_from_env()
+
+    assert config.get_direct_backend_settings().llm_api_key == "openai-key"
+
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    config.refresh_runtime_config_from_env()
+
+    assert config.get_direct_backend_settings().llm_api_key == "hf-token"

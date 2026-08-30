@@ -301,7 +301,9 @@ def build_speech_services(settings: DirectBackendSettings) -> SpeechServices:
         raise RuntimeError("Set OPENAI_API_KEY (or DIRECT_TTS_API_KEY) to synthesize with the direct backend.")
     llm_api_key = settings.llm_api_key or (get_token() or "").strip()
     if not llm_api_key:
-        raise RuntimeError("Set HF_TOKEN (or DIRECT_LLM_API_KEY) to reach the direct backend's language model.")
+        raise RuntimeError(
+            "Set HF_TOKEN, OPENAI_API_KEY or DIRECT_LLM_API_KEY to reach the direct backend's language model."
+        )
 
     stt_client = AsyncOpenAI(api_key=settings.stt_api_key, base_url=settings.stt_base_url, timeout=_STT_TIMEOUT_S)
     llm_client = AsyncOpenAI(api_key=llm_api_key, base_url=settings.llm_base_url, timeout=_LLM_TIMEOUT_S)
