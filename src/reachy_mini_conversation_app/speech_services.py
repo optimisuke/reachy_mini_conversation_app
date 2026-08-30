@@ -54,6 +54,9 @@ _DEFAULT_PROVIDER_VOICE: Final[str] = "alloy"
 _SENTENCE_END_CHARS: Final[str] = "。．！？!?…\n"
 _SOFT_BREAK_CHARS: Final[str] = "、，,;:）)"
 _MAX_CHUNK_CHARS: Final[int] = 160
+# The first piece gates when Reachy starts talking, so let a comma end it once
+# there is enough to say. Later pieces wait for a sentence, which reads better.
+_FIRST_PIECE_MIN_CHARS: Final[int] = 10
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,7 @@ class SentenceBuffer:
     def __init__(self) -> None:
         """Start with an empty buffer."""
         self._buffer = ""
+        self._released_any = False
 
     def push(self, text: str) -> list[str]:
         """Add streamed text and return the pieces that are ready to speak."""
@@ -137,15 +141,20 @@ class SentenceBuffer:
                 return pieces
             if piece.strip():
                 pieces.append(piece.strip())
+                self._released_any = True
 
     def flush(self) -> str:
         """Return whatever is left, emptying the buffer."""
         remainder, self._buffer = self._buffer.strip(), ""
+        if remainder:
+            self._released_any = True
         return remainder
 
     def _take_piece(self) -> str | None:
         """Cut off the next speakable piece, or None while the buffer is still short."""
         end = self._sentence_end()
+        if end is None and not self._released_any:
+            end = self._first_piece_break()
         if end is None:
             if len(self._buffer) < _MAX_CHUNK_CHARS:
                 return None
@@ -175,6 +184,13 @@ class SentenceBuffer:
             return True
         following = self._buffer[index + 1 :]
         return bool(following) and not following[0].isdigit()
+
+    def _first_piece_break(self) -> int | None:
+        """Return the first comma-like break past the minimum length for an opening piece."""
+        for index in range(_FIRST_PIECE_MIN_CHARS - 1, len(self._buffer)):
+            if self._buffer[index] in _SOFT_BREAK_CHARS:
+                return index
+        return None
 
     def _soft_break(self) -> int | None:
         """Return the last comma-like break inside the maximum chunk length."""

@@ -42,20 +42,50 @@ def test_speech_then_silence_yields_one_utterance() -> None:
     end_events = segmenter.push(_silence(1.0))
 
     assert [event.speech_started for event in onset_events] == [True]
-    assert len(end_events) == 1
-    utterance = end_events[0].utterance
+    # A short pause offers a guess first, then the full silence confirms the turn.
+    assert [event.provisional for event in end_events] == [True, False]
+    utterance = end_events[-1].utterance
     assert utterance is not None
     # The captured audio covers the speech, the pre-roll ahead of it and the closing silence.
     assert utterance.size / SAMPLE_RATE > 0.5
 
 
 def test_utterances_shorter_than_the_minimum_are_dropped() -> None:
-    """A cough should not reach the transcription stage."""
+    """A cough should reach neither the early nor the final transcription."""
     segmenter = _segmenter(min_utterance_s=0.5)
     segmenter.push(_silence(1.0))
     segmenter.push(_tone(0.05, 0.2))
 
     assert segmenter.push(_silence(1.0)) == []
+
+
+def test_a_pause_offers_the_speech_so_far_for_transcription() -> None:
+    """The guess carries the audio heard so far, so its transcription can be reused."""
+    segmenter = _segmenter()
+    segmenter.push(_silence(1.0))
+    segmenter.push(_tone(0.05, 0.6))
+
+    events = segmenter.push(_silence(0.25))
+
+    assert len(events) == 1
+    guess = events[0]
+    assert guess.provisional and guess.utterance is not None
+    # The windows that proved the onset are not counted again.
+    settings = SpeechDetectionSettings()
+    assert guess.voiced_windows == round((0.6 - settings.speech_start_s) / settings.window_s)
+    # Long enough to hold the speech plus its pre-roll.
+    assert guess.utterance.size / SAMPLE_RATE > 0.6
+
+
+def test_the_guess_is_skipped_when_it_is_turned_off() -> None:
+    """Setting the threshold to zero transcribes once, at the end of the turn."""
+    segmenter = _segmenter(speculative_silence_s=0.0)
+    segmenter.push(_silence(1.0))
+    segmenter.push(_tone(0.05, 0.6))
+
+    events = segmenter.push(_silence(1.0))
+
+    assert [event.provisional for event in events] == [False]
 
 
 def test_long_speech_is_cut_at_the_maximum_length() -> None:

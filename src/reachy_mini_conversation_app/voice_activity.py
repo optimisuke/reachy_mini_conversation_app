@@ -37,6 +37,10 @@ class UtteranceEvent:
 
     speech_started: bool = False
     utterance: NDArray[np.int16] | None = None
+    # A provisional utterance is a guess that the turn ended, offered early so
+    # transcription can start; a confirmed one has waited out the full silence.
+    provisional: bool = False
+    voiced_windows: int = 0
     level: float = 0.0
     threshold: float = 0.0
 
@@ -141,11 +145,32 @@ class SpeechSegmenter:
             self._silent_windows += 1
             if self._silent_windows >= self._windows_for(self._settings.silence_end_s):
                 return self._close_utterance()
+            if self._silent_windows == self._provisional_windows() and self._holds_enough_speech():
+                return [self._provisional_utterance()]
 
         if len(self._utterance) * self._settings.window_s >= self._settings.max_utterance_s:
             logger.debug("Cutting utterance at the %.1fs limit", self._settings.max_utterance_s)
             return self._close_utterance(relearn_noise_floor=True)
         return []
+
+    def _provisional_windows(self) -> int:
+        """Return the silent-window count that offers an early guess, or 0 when disabled."""
+        if self._settings.speculative_silence_s <= 0:
+            return 0
+        windows = self._windows_for(self._settings.speculative_silence_s)
+        return windows if windows < self._windows_for(self._settings.silence_end_s) else 0
+
+    def _holds_enough_speech(self) -> bool:
+        """Return whether the speech so far is worth transcribing at all."""
+        return self._voiced_in_speech * self._settings.window_s >= self._settings.min_utterance_s
+
+    def _provisional_utterance(self) -> UtteranceEvent:
+        """Offer the speech so far as a guess that the turn has ended."""
+        return UtteranceEvent(
+            utterance=np.concatenate(self._utterance),
+            provisional=True,
+            voiced_windows=self._voiced_in_speech,
+        )
 
     def _close_utterance(self, *, relearn_noise_floor: bool = False) -> list[UtteranceEvent]:
         """End the current utterance, dropping it when it holds too little speech."""
@@ -154,7 +179,8 @@ class SpeechSegmenter:
         if surplus_silence > 0:
             windows = windows[:-surplus_silence]
         utterance = np.concatenate(windows) if windows else np.zeros(0, dtype=np.int16)
-        voiced_s = self._voiced_in_speech * self._settings.window_s
+        voiced_windows = self._voiced_in_speech
+        voiced_s = voiced_windows * self._settings.window_s
         self.reset()
 
         if relearn_noise_floor:
@@ -165,7 +191,7 @@ class SpeechSegmenter:
         if voiced_s < self._settings.min_utterance_s:
             logger.debug("Dropping utterance holding only %.2fs of speech", voiced_s)
             return []
-        return [UtteranceEvent(utterance=utterance)]
+        return [UtteranceEvent(utterance=utterance, voiced_windows=voiced_windows)]
 
     def _track_noise_floor(self, level: float) -> None:
         """Follow the room level, dropping fast and rising slowly."""

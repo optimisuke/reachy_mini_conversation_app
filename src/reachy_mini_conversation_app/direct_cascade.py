@@ -82,6 +82,7 @@ class TurnTiming:
     speech_ended_at: float
     utterance_at: float
     transcribed_at: float | None = None
+    transcription_reused: bool = False
     first_sentence_at: float | None = None
     first_audio_at: float | None = None
 
@@ -123,6 +124,7 @@ class DirectCascadeHandler(ConversationHandler):
         self._speech_task: asyncio.Task[None] | None = None
         self._speech_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
         self._pending_tool_results: dict[str, asyncio.Future[ToolOutcome]] = {}
+        self._guessed_transcription: tuple[int, asyncio.Task[str]] | None = None
         self._llm_vision = False
         self._assistant_speaking = False
         self._playback_ends_at = 0.0
@@ -170,6 +172,7 @@ class DirectCascadeHandler(ConversationHandler):
     async def _close_session(self) -> None:
         """Tear the session down; safe to call from both shutdown paths."""
         self._session_open.clear()
+        self._drop_guessed_transcription()
         await self._cancel_active_turn()
         await self._stop_speaking()
         await self.tool_manager.shutdown()
@@ -207,8 +210,12 @@ class DirectCascadeHandler(ConversationHandler):
         for event in self._segmenter.push(samples):
             if event.speech_started:
                 await self._on_speech_started(event)
-            if event.utterance is not None:
-                await self._on_utterance(event.utterance)
+            if event.utterance is None:
+                continue
+            if event.provisional:
+                self._guess_transcription(event.utterance, event.voiced_windows)
+            else:
+                await self._on_utterance(event.utterance, event.voiced_windows)
 
     async def _on_speech_started(self, event: UtteranceEvent) -> None:
         """Mark the user as talking, interrupting Reachy when it is mid-answer."""
@@ -221,10 +228,55 @@ class DirectCascadeHandler(ConversationHandler):
                 event.level,
                 event.threshold,
             )
+            self._drop_guessed_transcription()
             await self._cancel_active_turn()
             await self._stop_speaking()
 
-    async def _on_utterance(self, utterance: NDArray[np.int16]) -> None:
+    def _guess_transcription(self, utterance: NDArray[np.int16], voiced_windows: int) -> None:
+        """Transcribe the pause as if the turn had ended, to overlap the rest of the wait."""
+        services = self._services
+        if services is None:
+            return
+        self._drop_guessed_transcription()
+        self._guessed_transcription = (
+            voiced_windows,
+            asyncio.create_task(
+                services.speech_to_text.transcribe(utterance, self.SAMPLE_RATE),
+                name="direct-stt-guess",
+            ),
+        )
+
+    def _drop_guessed_transcription(self) -> None:
+        """Discard an early transcription that the rest of the turn made stale."""
+        guess, self._guessed_transcription = self._guessed_transcription, None
+        if guess is not None:
+            guess[1].cancel()
+
+    async def _transcribe(
+        self,
+        services: SpeechServices,
+        utterance: NDArray[np.int16],
+        voiced_windows: int,
+    ) -> str:
+        """Return the utterance's transcript, reusing the early one when it covers the same speech."""
+        guess, self._guessed_transcription = self._guessed_transcription, None
+        if guess is not None and guess[0] == voiced_windows:
+            try:
+                transcript = await guess[1]
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug("Early transcription failed, transcribing again: %s", e)
+            else:
+                if self._turn_timing is not None:
+                    self._turn_timing.transcription_reused = True
+                return transcript
+        elif guess is not None:
+            logger.debug("The user kept talking, so the early transcription was dropped")
+            guess[1].cancel()
+        return await services.speech_to_text.transcribe(utterance, self.SAMPLE_RATE)
+
+    async def _on_utterance(self, utterance: NDArray[np.int16], voiced_windows: int) -> None:
         """Answer a completed utterance."""
         self._mark_activity("user_speech_stopped")
         self.deps.movement_manager.set_listening(False)
@@ -235,7 +287,7 @@ class DirectCascadeHandler(ConversationHandler):
             utterance_at=now,
         )
         await self._cancel_active_turn()
-        self._start_turn(self._run_turn(utterance), name="direct-turn")
+        self._start_turn(self._run_turn(utterance, voiced_windows), name="direct-turn")
 
     def _start_turn(self, turn: Coroutine[Any, Any, None], name: str) -> None:
         """Run ``turn`` as the one cancellable turn, freeing the slot when it ends."""
@@ -250,12 +302,13 @@ class DirectCascadeHandler(ConversationHandler):
 
     # ---- turn pipeline ----
 
-    async def _run_turn(self, utterance: NDArray[np.int16]) -> None:
+    async def _run_turn(self, utterance: NDArray[np.int16], voiced_windows: int) -> None:
         """Transcribe an utterance, then answer it."""
-        if self._services is None:
+        services = self._services
+        if services is None:
             return
         try:
-            transcript = await self._services.speech_to_text.transcribe(utterance, self.SAMPLE_RATE)
+            transcript = await self._transcribe(services, utterance, voiced_windows)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -466,7 +519,9 @@ class DirectCascadeHandler(ConversationHandler):
 
         stages = [("silence", timing.speech_ended_at, timing.utterance_at)]
         if timing.transcribed_at is not None:
-            stages.append(("stt", timing.utterance_at, timing.transcribed_at))
+            stages.append(
+                ("stt(reused)" if timing.transcription_reused else "stt", timing.utterance_at, timing.transcribed_at)
+            )
             if timing.first_sentence_at is not None:
                 stages.append(("answer", timing.transcribed_at, timing.first_sentence_at))
                 stages.append(("speech", timing.first_sentence_at, timing.first_audio_at))

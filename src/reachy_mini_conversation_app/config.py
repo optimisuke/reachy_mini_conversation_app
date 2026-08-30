@@ -591,6 +591,9 @@ class SpeechDetectionSettings:
     speech_start_s: float = 0.12
     barge_in_start_s: float = 0.3
     silence_end_s: float = 0.45
+    # A short pause is usually the end of a turn, so transcription can start there
+    # and overlap the rest of the wait. Set to 0 to only transcribe once.
+    speculative_silence_s: float = 0.18
     preroll_s: float = 0.3
     min_utterance_s: float = 0.25
     max_utterance_s: float = 20.0
@@ -607,6 +610,7 @@ def get_speech_detection_settings() -> SpeechDetectionSettings:
         speech_start_s=_env_float("DIRECT_VAD_SPEECH_START_S", defaults.speech_start_s),
         barge_in_start_s=_env_float("DIRECT_VAD_BARGE_IN_START_S", defaults.barge_in_start_s),
         silence_end_s=_env_float("DIRECT_VAD_SILENCE_END_S", defaults.silence_end_s),
+        speculative_silence_s=_env_float("DIRECT_VAD_SPECULATIVE_SILENCE_S", defaults.speculative_silence_s),
         preroll_s=_env_float("DIRECT_VAD_PREROLL_S", defaults.preroll_s),
         min_utterance_s=_env_float("DIRECT_VAD_MIN_UTTERANCE_S", defaults.min_utterance_s),
         max_utterance_s=_env_float("DIRECT_VAD_MAX_UTTERANCE_S", defaults.max_utterance_s),

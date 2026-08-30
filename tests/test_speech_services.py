@@ -231,3 +231,22 @@ def test_build_speech_services_wires_every_stage() -> None:
 
     assert services.text_to_speech.sample_rate == 24000
     assert len(services.clients) == 3
+
+
+def test_the_opening_piece_may_end_at_a_comma() -> None:
+    """Reachy starts talking at the first comma; later pieces wait for a sentence."""
+    buffer = SentenceBuffer()
+
+    # Long enough to be worth saying, so the comma releases it.
+    assert buffer.push("今日は天気がよくて、散歩に") == ["今日は天気がよくて、"]
+    # After the opening, a comma alone no longer releases: the rest waits for the full stop.
+    assert buffer.push("行きたい気分、なんだよね") == []
+    assert buffer.push("。") == ["散歩に行きたい気分、なんだよね。"]
+
+
+def test_a_short_opening_clause_still_waits_for_the_sentence() -> None:
+    """A two-word opening would sound clipped, so it waits."""
+    buffer = SentenceBuffer()
+
+    assert buffer.push("はい、元気") == []
+    assert buffer.push("だよ。") == ["はい、元気だよ。"]
