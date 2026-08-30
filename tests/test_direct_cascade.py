@@ -153,7 +153,7 @@ def _drain_audio_frames(handler: DirectCascadeHandler, collected: list[Any]) -> 
 
 async def _say_something(handler: DirectCascadeHandler) -> None:
     """Feed one spoken utterance followed by enough silence to close it."""
-    await handler.receive((SAMPLE_RATE, _tone(0.05, 0.6)))
+    await handler.receive((SAMPLE_RATE, _tone(0.08, 0.9)))
     await handler.receive((SAMPLE_RATE, _silence(1.0)))
 
 

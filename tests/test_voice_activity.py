@@ -26,6 +26,18 @@ def _segmenter(**overrides: float) -> SpeechSegmenter:
     return SpeechSegmenter(SAMPLE_RATE, SpeechDetectionSettings(**overrides))
 
 
+def _clear_speech_level(**overrides: float) -> float:
+    """Return a level comfortably above what the shipped thresholds call speech."""
+    settings = SpeechDetectionSettings(**overrides)
+    return max(settings.min_level, settings.min_level * settings.speech_start_ratio) * 1.5
+
+
+def _speech_duration(**overrides: float) -> float:
+    """Return a speech length that clears the minimum once the onset is discounted."""
+    settings = SpeechDetectionSettings(**overrides)
+    return settings.speech_start_s + settings.min_utterance_s + 0.2
+
+
 def test_silence_never_opens_a_turn() -> None:
     """A quiet room should produce no events."""
     segmenter = _segmenter()
@@ -38,7 +50,7 @@ def test_speech_then_silence_yields_one_utterance() -> None:
     segmenter = _segmenter()
     segmenter.push(_silence(1.0))
 
-    onset_events = segmenter.push(_tone(0.05, 0.5))
+    onset_events = segmenter.push(_tone(_clear_speech_level(), _speech_duration()))
     end_events = segmenter.push(_silence(1.0))
 
     assert [event.speech_started for event in onset_events] == [True]
@@ -47,14 +59,14 @@ def test_speech_then_silence_yields_one_utterance() -> None:
     utterance = end_events[-1].utterance
     assert utterance is not None
     # The captured audio covers the speech, the pre-roll ahead of it and the closing silence.
-    assert utterance.size / SAMPLE_RATE > 0.5
+    assert utterance.size / SAMPLE_RATE > _speech_duration()
 
 
 def test_utterances_shorter_than_the_minimum_are_dropped() -> None:
     """A cough should reach neither the early nor the final transcription."""
     segmenter = _segmenter(min_utterance_s=0.5)
     segmenter.push(_silence(1.0))
-    segmenter.push(_tone(0.05, 0.2))
+    segmenter.push(_tone(_clear_speech_level(), 0.2))
 
     assert segmenter.push(_silence(1.0)) == []
 
@@ -63,7 +75,7 @@ def test_a_pause_offers_the_speech_so_far_for_transcription() -> None:
     """The guess carries the audio heard so far, so its transcription can be reused."""
     segmenter = _segmenter()
     segmenter.push(_silence(1.0))
-    segmenter.push(_tone(0.05, 0.6))
+    segmenter.push(_tone(_clear_speech_level(), 0.6))
 
     events = segmenter.push(_silence(0.25))
 
@@ -81,7 +93,7 @@ def test_the_guess_is_skipped_when_it_is_turned_off() -> None:
     """Setting the threshold to zero transcribes once, at the end of the turn."""
     segmenter = _segmenter(speculative_silence_s=0.0)
     segmenter.push(_silence(1.0))
-    segmenter.push(_tone(0.05, 0.6))
+    segmenter.push(_tone(_clear_speech_level(), _speech_duration()))
 
     events = segmenter.push(_silence(1.0))
 
@@ -93,7 +105,7 @@ def test_long_speech_is_cut_at_the_maximum_length() -> None:
     segmenter = _segmenter(max_utterance_s=1.0)
     segmenter.push(_silence(0.5))
 
-    events = segmenter.push(_tone(0.05, 3.0))
+    events = segmenter.push(_tone(_clear_speech_level(), 3.0))
 
     utterances = [event.utterance for event in events if event.utterance is not None]
     assert utterances and utterances[0].size / SAMPLE_RATE <= 1.1
@@ -105,27 +117,46 @@ def test_reachy_talking_raises_the_trigger() -> None:
     segmenter.push(_silence(1.0))
     segmenter.set_assistant_speaking(True)
 
-    assert segmenter.push(_tone(0.008, 0.5)) == []
-    assert [event.speech_started for event in segmenter.push(_tone(0.05, 0.5))] == [True]
+    settings = SpeechDetectionSettings()
+    assert segmenter.push(_tone(settings.barge_in_min_level * 0.8, 0.5)) == []
+    assert [event.speech_started for event in segmenter.push(_tone(_clear_speech_level(), 0.5))] == [True]
 
 
 def test_the_noise_floor_follows_a_noisy_room() -> None:
     """Background hiss should raise the bar for what counts as speech."""
+    settings = SpeechDetectionSettings()
+    # Above the absolute minimum, so a quiet room calls it speech, but below the bar a
+    # room with hiss in it sets.
+    marginal = settings.min_level * 2.0
     quiet_room, noisy_room = _segmenter(), _segmenter()
     quiet_room.push(_silence(3.0))
-    # Hiss below the absolute minimum never opens a turn, but it is learned.
-    noisy_room.push(_tone(0.0025, 10.0))
+    # Hiss just under the absolute minimum never opens a turn, but it is learned.
+    noisy_room.push(_tone(settings.min_level * 0.9, 10.0))
 
-    assert [event.speech_started for event in quiet_room.push(_tone(0.007, 0.5))] == [True]
-    assert noisy_room.push(_tone(0.007, 0.5)) == []
+    assert [event.speech_started for event in quiet_room.push(_tone(marginal, 0.5))] == [True]
+    assert noisy_room.push(_tone(marginal, 0.5)) == []
 
 
 def test_a_room_that_never_goes_quiet_stops_triggering() -> None:
     """Noise loud enough to open a turn should be relearned when the turn never ends."""
     segmenter = _segmenter(max_utterance_s=1.0)
+    noise = _clear_speech_level()
 
-    first_events = segmenter.push(_tone(0.02, 3.0))
-    settled_events = segmenter.push(_tone(0.02, 3.0))
+    first_events = segmenter.push(_tone(noise, 3.0))
+    settled_events = segmenter.push(_tone(noise, 3.0))
 
     assert any(event.speech_started for event in first_events)
     assert settled_events == []
+
+
+def test_the_microphone_can_be_ignored_while_reachy_talks() -> None:
+    """With barge-in off, nothing Reachy's own voice does can open a turn."""
+    segmenter = _segmenter(barge_in_enabled=False)
+    segmenter.push(_silence(1.0))
+    segmenter.set_assistant_speaking(True)
+
+    assert segmenter.push(_tone(_clear_speech_level() * 4, 2.0)) == []
+
+    segmenter.set_assistant_speaking(False)
+
+    assert [event.speech_started for event in segmenter.push(_tone(_clear_speech_level(), 0.5))] == [True]

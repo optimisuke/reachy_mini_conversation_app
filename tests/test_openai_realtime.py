@@ -1,6 +1,7 @@
 """Tests for the realtime backend."""
 
 import base64
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -114,3 +115,35 @@ def test_the_reply_comes_down_to_the_speaker_rate(monkeypatch: Any) -> None:
     decoded = handler._decode_output_audio(base64.b64encode(block.tobytes()).decode())
 
     assert abs(decoded.size - SAMPLE_RATE // 10) <= 2
+
+
+@pytest.mark.asyncio
+async def test_the_bar_stays_up_until_the_speaker_has_finished(monkeypatch: Any) -> None:
+    """The server finishing its send is not the speaker finishing playback."""
+    handler = _handler(monkeypatch)
+    reply = np.zeros(handler._realtime_rate // 5, dtype=np.int16)  # 200 ms of audio
+
+    handler._set_speaking(True)
+    handler._decode_output_audio(base64.b64encode(reply.tobytes()).decode())
+    handler._set_speaking(False)
+
+    # The send is over, but a second of audio is still on its way to the speaker.
+    assert handler._segmenter._assistant_speaking is True
+    await asyncio.sleep(0.05)
+    assert handler._segmenter._assistant_speaking is True, "lowering the bar early lets Reachy hear itself"
+
+    await asyncio.sleep(0.2 + realtime_mod._SPEAKING_TAIL_S + 0.2)
+
+    assert handler._segmenter._assistant_speaking is False
+
+
+@pytest.mark.asyncio
+async def test_speaking_again_cancels_the_wait(monkeypatch: Any) -> None:
+    """A new reply while the last one drains must keep the bar up, not lower it."""
+    handler = _handler(monkeypatch)
+
+    handler._set_speaking(False)
+    handler._set_speaking(True)
+    await asyncio.sleep(realtime_mod._SPEAKING_TAIL_S + 0.1)
+
+    assert handler._segmenter._assistant_speaking is True

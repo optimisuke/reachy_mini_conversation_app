@@ -113,6 +113,10 @@ class SpeechSegmenter:
 
     def _consume_window(self, window: NDArray[np.int16]) -> list[UtteranceEvent]:
         """Classify one analysis window and advance the speech state machine."""
+        if self._assistant_speaking and not self._settings.barge_in_enabled:
+            # Reachy's own voice is the only thing the microphone can hear right now.
+            return []
+
         min_level, ratio, onset_s = self._trigger()
         level = _rms(window)
         threshold = max(min_level, self._noise_floor * ratio)

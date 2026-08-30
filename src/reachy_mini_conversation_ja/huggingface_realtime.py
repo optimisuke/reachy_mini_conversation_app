@@ -204,6 +204,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             tool_choice="auto",
         )
 
+    def _set_speaking(self, speaking: bool) -> None:
+        """Record that Reachy is or is not talking, for motion and for the microphone."""
+        self.deps.movement_manager.set_speaking(speaking)
+
     def _connect_kwargs(self) -> dict[str, Any]:
         """Return the arguments that open the realtime socket for this provider."""
         if self._realtime_connect_query:
@@ -724,7 +728,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
-                        self.deps.movement_manager.set_speaking(False)
+                        self._set_speaking(False)
                         logger.debug("response completed")
 
                     if event.type == "response.output_text.delta":
@@ -735,19 +739,19 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
-                        self.deps.movement_manager.set_speaking(True)
+                        self._set_speaking(True)
                         self._response_done_event.clear()
                         self._response_started_or_rejected_event.set()
                         if self._turn_user_done_at is not None and self._turn_response_created_at is None:
                             self._turn_response_created_at = time.perf_counter()
                             delta_ms = (self._turn_response_created_at - self._turn_user_done_at) * 1000
-                            logger.info("Turn latency: response.created %.0f ms after user transcript", delta_ms)
+                            logger.info("Turn latency: response.created %.0f ms after the turn ended", delta_ms)
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
                         # Doesn't mean the audio is done playing
                         # Resume tracking for responses that emit no audio (text-only / tool-only).
-                        self.deps.movement_manager.set_speaking(False)
+                        self._set_speaking(False)
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
@@ -811,7 +815,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
-                            logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
+                            logger.info("Turn latency: first audio delta %.0f ms after the turn ended", delta_ms)
                         await self.output_queue.put(
                             (
                                 self.SAMPLE_RATE,
@@ -893,6 +897,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         if code not in (
                             "input_audio_buffer_commit_empty",
                             "conversation_already_has_active_response",
+                            "response_cancel_not_active",
                         ):
                             await self.output_queue.put(
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})

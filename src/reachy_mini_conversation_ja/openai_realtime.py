@@ -10,7 +10,9 @@ so an idle robot would pay to be listened to. Segmenting locally means nothing i
 sent until someone speaks, and it keeps the thresholds tuned on this microphone.
 """
 
+import time
 import base64
+import asyncio
 import logging
 from typing import Any, Final
 from collections import deque
@@ -43,6 +45,9 @@ from reachy_mini_conversation_ja.huggingface_realtime import (
 
 
 logger = logging.getLogger(__name__)
+
+# The speaker drains and the room rings after the last block is queued.
+_SPEAKING_TAIL_S: Final[float] = 0.4
 
 # The voice catalog the UI and profiles use comes from the Hugging Face backend's
 # speakers, so map it onto the realtime voices. REALTIME_VOICE overrides the map.
@@ -80,15 +85,54 @@ class OpenAIRealtimeHandler(HuggingFaceRealtimeHandler):
         self._output_resampler = StreamingResampler(self._realtime_rate, self.SAMPLE_RATE)
         self._preroll: deque[NDArray[np.int16]] = deque(maxlen=_preroll_frames())
         self._streaming_speech = False
+        self._playback_ends_at = 0.0
+        self._speaking_tail: asyncio.Task[None] | None = None
+
+    def _set_speaking(self, speaking: bool) -> None:
+        """Raise the microphone's bar while Reachy talks, so it does not answer itself.
+
+        Echo cancellation leaves a distorted residual of Reachy's own voice, which
+        transcribes as noise; answering that starts a loop that never ends. The server
+        finishing its send is not the speaker finishing its playback, so the bar comes
+        back down only once the audio already queued has actually been heard.
+        """
+        super()._set_speaking(speaking)
+        if speaking:
+            self._cancel_speaking_tail()
+            self._segmenter.set_assistant_speaking(True)
+            return
+        self._speaking_tail = asyncio.create_task(self._lower_the_bar_after_playback())
+
+    async def _lower_the_bar_after_playback(self) -> None:
+        """Keep the raised trigger until the queued audio has played, and a moment after."""
+        try:
+            while True:
+                remaining = self._playback_ends_at - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(remaining)
+            await asyncio.sleep(_SPEAKING_TAIL_S)
+        except asyncio.CancelledError:
+            return
+        self._segmenter.set_assistant_speaking(False)
+
+    def _cancel_speaking_tail(self) -> None:
+        """Stop waiting for playback to finish, because Reachy started talking again."""
+        tail, self._speaking_tail = self._speaking_tail, None
+        if tail is not None and not tail.done():
+            tail.cancel()
 
     def _connect_kwargs(self) -> dict[str, Any]:
         """Open the socket for the configured realtime model."""
         return {"model": self._realtime_model}
 
     def _decode_output_audio(self, delta: str) -> NDArray[np.int16]:
-        """Bring the reply down to the rate the speaker runs at."""
+        """Bring the reply down to the rate the speaker runs at, tracking playback."""
         block = np.frombuffer(base64.b64decode(delta), dtype=np.int16)
-        return self._output_resampler.process(block)
+        resampled = self._output_resampler.process(block)
+        now = time.monotonic()
+        self._playback_ends_at = max(self._playback_ends_at, now) + resampled.size / self.SAMPLE_RATE
+        return resampled
 
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build a client for OpenAI itself, with no session allocator in between."""
@@ -183,6 +227,10 @@ class OpenAIRealtimeHandler(HuggingFaceRealtimeHandler):
         except Exception as e:
             logger.debug("Dropping turn: input buffer could not be committed (%s)", e)
             return
+        # The transcript can land after the audio here, so time the wait from the commit.
+        self._turn_user_done_at = time.perf_counter()
+        self._turn_response_created_at = None
+        self._turn_first_audio_at = None
         await self._safe_response_create()
 
     async def _send_audio(self, samples: NDArray[np.int16]) -> None:

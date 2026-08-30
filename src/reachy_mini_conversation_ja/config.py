@@ -595,18 +595,23 @@ class SpeechDetectionSettings:
     """
 
     window_s: float = 0.02
-    min_level: float = 0.006
-    barge_in_min_level: float = 0.012
-    speech_start_ratio: float = 3.0
+    # An energy detector cannot tell a voice from a washing machine, so the levels and
+    # durations are set where household noise mostly falls below them.
+    min_level: float = 0.010
+    barge_in_min_level: float = 0.018
+    # Off means the microphone is ignored entirely while Reachy talks: it can never
+    # answer its own echo, and it can never be interrupted either.
+    barge_in_enabled: bool = True
+    speech_start_ratio: float = 3.5
     barge_in_ratio: float = 6.0
-    speech_start_s: float = 0.12
+    speech_start_s: float = 0.15
     barge_in_start_s: float = 0.3
     silence_end_s: float = 0.45
     # A short pause is usually the end of a turn, so transcription can start there
     # and overlap the rest of the wait. Set to 0 to only transcribe once.
     speculative_silence_s: float = 0.18
     preroll_s: float = 0.3
-    min_utterance_s: float = 0.25
+    min_utterance_s: float = 0.4
     max_utterance_s: float = 20.0
 
 
@@ -616,6 +621,7 @@ def get_speech_detection_settings() -> SpeechDetectionSettings:
     return SpeechDetectionSettings(
         min_level=_env_float("DIRECT_VAD_MIN_LEVEL", defaults.min_level),
         barge_in_min_level=_env_float("DIRECT_VAD_BARGE_IN_MIN_LEVEL", defaults.barge_in_min_level),
+        barge_in_enabled=_env_flag("DIRECT_VAD_BARGE_IN", default=defaults.barge_in_enabled),
         speech_start_ratio=_env_float("DIRECT_VAD_SPEECH_START_RATIO", defaults.speech_start_ratio),
         barge_in_ratio=_env_float("DIRECT_VAD_BARGE_IN_RATIO", defaults.barge_in_ratio),
         speech_start_s=_env_float("DIRECT_VAD_SPEECH_START_S", defaults.speech_start_s),
