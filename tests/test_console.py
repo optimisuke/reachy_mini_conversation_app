@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import reachy_mini_conversation_ja.console as console_mod
+from reachy_mini_conversation_ja import config as config_mod
 from reachy_mini_conversation_ja.config import (
     HF_BACKEND,
     HF_AVAILABLE_VOICES,
@@ -976,7 +977,7 @@ def test_backend_config_saves_an_api_key_and_reconnects(
     data = _rpc_call(app, "backend.config", {"api_key": "  sk-written-by-the-ui  "})["result"]
 
     assert data["ok"] is True
-    assert data["message"] == "Key saved. Reconnecting backend."
+    assert data["message"] == "Saved. Reconnecting backend."
     assert data["has_key"] is True
     assert data["can_proceed"] is True
     assert stream._restart_requested.is_set()
@@ -1059,3 +1060,95 @@ def test_launch_picks_up_a_key_written_into_the_instance_env_while_waiting(
         stream.launch()
 
     media.start_recording.assert_called_once()
+
+
+def test_status_offers_the_realtime_models_and_where_the_robot_stands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The settings page renders these, so they have to be in the payload."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.delenv("REALTIME_MODEL", raising=False)
+    monkeypatch.delenv(config_mod.LOCATION_TIMEZONE_ENV, raising=False)
+    monkeypatch.delenv(config_mod.LOCATION_PLACE_ENV, raising=False)
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    data = _rpc_call(app, "conversation.status")["result"]
+
+    assert data["timezone"] == config_mod.LOCATION_DEFAULT_TIMEZONE
+    assert data["location"] == config_mod.LOCATION_DEFAULT_PLACE
+    offered = [choice["id"] for choice in data["realtime_model_choices"]]
+    assert data["realtime_model"] in offered
+    assert all(choice["hint"] for choice in data["realtime_model_choices"])
+
+
+def test_a_model_set_by_hand_is_still_listed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise the page would show a different model than the one in force."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.setenv("REALTIME_MODEL", "gpt-realtime-2025-08-28")
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    data = _rpc_call(app, "conversation.status")["result"]
+
+    assert data["realtime_model"] == "gpt-realtime-2025-08-28"
+    assert data["realtime_model_choices"][0]["id"] == "gpt-realtime-2025-08-28"
+
+
+def test_backend_config_saves_the_model_and_the_place(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All three settings travel together and land in the durable instance .env."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-already-there")
+
+    app = FastAPI()
+    stream = _key_stream(tmp_path, app)
+
+    data = _rpc_call(
+        app,
+        "backend.config",
+        {"realtime_model": "gpt-realtime-2.1", "timezone": "Europe/Paris", "location": " Paris, France "},
+    )["result"]
+
+    assert data["realtime_model"] == "gpt-realtime-2.1"
+    assert data["timezone"] == "Europe/Paris"
+    assert data["location"] == "Paris, France"
+    assert stream._restart_requested.is_set()
+    saved = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "REALTIME_MODEL=gpt-realtime-2.1" in saved
+    assert "CONVERSATION_LOCATION=Paris, France" in saved
+
+
+@pytest.mark.parametrize(
+    ("params", "reason"),
+    [
+        ({"realtime_model": "not a model/name"}, "invalid_realtime_model"),
+        ({"realtime_model": "  "}, "invalid_realtime_model"),
+        ({"timezone": "Asia Tokyo!"}, "invalid_timezone"),
+        ({"location": ""}, "invalid_location"),
+    ],
+)
+def test_backend_config_refuses_values_the_tools_could_not_use(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    params: dict[str, str],
+    reason: str,
+) -> None:
+    """A bad value saved silently would only surface as a wrong answer much later."""
+    monkeypatch.setenv(CONVERSATION_BACKEND_ENV, OPENAI_REALTIME_BACKEND)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-already-there")
+
+    app = FastAPI()
+    _key_stream(tmp_path, app)
+
+    response = _rpc_call(app, "backend.config", params)
+
+    assert response["error"]["data"]["reason"] == reason

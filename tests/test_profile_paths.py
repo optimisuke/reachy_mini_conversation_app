@@ -44,6 +44,12 @@ WINDOWS_PATH_BUDGET = 130
 WINDOWS_WHEEL_PATH_BUDGET = 71
 
 
+def _with_location(instructions: str) -> str:
+    """Append the where-you-are note the app always adds, so tests compare like for like."""
+    note = prompts_mod.format_location_for_prompt()
+    return f"{instructions}\n\n{note}" if note else instructions
+
+
 def _git_tracked_files(project_root: Path) -> list[Path]:
     """Return git-tracked files that still exist in the working tree."""
     try:
@@ -79,7 +85,7 @@ def test_prompts_load_from_compact_builtin_profile(tmp_path: Path, monkeypatch: 
         DEFAULT_PROFILES_DIRECTORY / "mad_scientist_assistant",
     ).instructions
 
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == _with_location(expected)
 
 
 def test_default_session_instructions_load_from_default_profile(
@@ -91,7 +97,7 @@ def test_default_session_instructions_load_from_default_profile(
 
     expected = read_profile_from_directory("default", DEFAULT_PROFILES_DIRECTORY / "default").instructions
 
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == _with_location(expected)
 
 
 def test_bracketed_prompt_line_stays_plain_text(
@@ -105,7 +111,9 @@ def test_bracketed_prompt_line_stays_plain_text(
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "literal_prompt")
 
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == "[custom_prompt]\n\nStay extra brief."
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == _with_location(
+        "[custom_prompt]\n\nStay extra brief."
+    )
 
 
 def test_session_instructions_fall_back_to_default_for_incomplete_profile(
@@ -121,7 +129,7 @@ def test_session_instructions_fall_back_to_default_for_incomplete_profile(
 
     expected = read_profile_from_directory("default", DEFAULT_PROFILES_DIRECTORY / "default").instructions
 
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == _with_location(expected)
 
 
 def test_explicit_default_profile_does_not_fall_back_to_itself(
@@ -264,7 +272,7 @@ def test_user_profile_round_trips_through_instance_dir(tmp_path: Path, monkeypat
 
     assert (tmp_path / "user_personalities" / "zen_master" / "profile.md").is_file()
     assert "user_personalities/zen_master" in list_personalities()
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == "Be calm."
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == _with_location("Be calm.")
 
 
 def test_packaged_profiles_win_outside_source_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

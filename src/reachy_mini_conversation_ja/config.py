@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import logging
+from typing import Final
 from pathlib import Path
 from dataclasses import dataclass
 from urllib.parse import urlsplit, parse_qsl, urlunsplit
@@ -84,22 +85,64 @@ OPENAI_REALTIME_BACKEND = "openai_realtime"
 # "兵庫県神戸市灘区" does not).
 LOCATION_TIMEZONE_ENV = "CONVERSATION_TIMEZONE"
 LOCATION_PLACE_ENV = "CONVERSATION_LOCATION"
+# This is the Japanese fork, so it ships ready for a robot in Japan rather than making
+# the first conversation be about configuration. Both are editable in the settings page.
+LOCATION_DEFAULT_TIMEZONE: Final[str] = "Asia/Tokyo"
+LOCATION_DEFAULT_PLACE: Final[str] = "Kobe, Japan"
+
+REALTIME_MODEL_ENV = "REALTIME_MODEL"
+# Offered in the settings page. The account may have more (translate- and whisper-
+# specific ones, dated snapshots); REALTIME_MODEL still accepts any of them by name.
+# The cost note is the reason to choose, so it travels with the id.
+REALTIME_MODEL_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("gpt-realtime-2.1-mini", "速くて安い。事実を取り違えることがある"),
+    ("gpt-realtime-2.1", "会話が正確。音声の出力単価が約3倍"),
+    ("gpt-realtime-mini", "mini の安定版エイリアス"),
+    ("gpt-realtime", "最新安定版のエイリアス"),
+)
+
+
+def get_realtime_model_choices() -> tuple[tuple[str, str], ...]:
+    """Return the realtime models the settings page offers, with why to pick each."""
+    return REALTIME_MODEL_CHOICES
+
+
+def is_valid_realtime_model_name(candidate: str) -> bool:
+    """Return whether a string is shaped like a model id, so it can be saved safely."""
+    name = candidate.strip()
+    if not name or len(name) > 100:
+        return False
+    return all(char.isalnum() or char in "-._" for char in name)
 
 
 @dataclass(frozen=True)
 class LocationSettings:
     """The robot's timezone and place, for tools that cannot work them out."""
 
-    timezone: str | None
-    place: str | None
+    timezone: str
+    place: str
 
 
 def get_location_settings() -> LocationSettings:
-    """Return the configured timezone and place, either of which may be unset."""
+    """Return the configured timezone and place, falling back to the shipped defaults."""
     return LocationSettings(
-        timezone=_optional_env_text(LOCATION_TIMEZONE_ENV),
-        place=_optional_env_text(LOCATION_PLACE_ENV),
+        timezone=_env_text(LOCATION_TIMEZONE_ENV, LOCATION_DEFAULT_TIMEZONE),
+        place=_env_text(LOCATION_PLACE_ENV, LOCATION_DEFAULT_PLACE),
     )
+
+
+def is_valid_timezone_name(candidate: str) -> bool:
+    """Return whether a string is shaped like an IANA timezone, so it can be saved."""
+    name = candidate.strip()
+    if not name or len(name) > 64:
+        return False
+    return all(char.isalnum() or char in "/_-+" for char in name)
+
+
+def is_valid_place_name(candidate: str) -> bool:
+    """Return whether a string is usable as a place for the weather lookup."""
+    name = candidate.strip()
+    return bool(name) and len(name) <= 120 and "\n" not in name and "\r" not in name
 
 
 @dataclass(frozen=True)
@@ -609,7 +652,7 @@ def get_direct_backend_settings() -> DirectBackendSettings:
         tts_voice=_optional_env_text("DIRECT_TTS_VOICE"),
         # Off by default because the default endpoint's model reads text only.
         llm_vision=_env_flag("DIRECT_LLM_VISION", default=False),
-        realtime_model=_env_text("REALTIME_MODEL", DIRECT_DEFAULTS.realtime_model),
+        realtime_model=_env_text(REALTIME_MODEL_ENV, DIRECT_DEFAULTS.realtime_model),
         realtime_voice=_env_text("REALTIME_VOICE", DIRECT_DEFAULTS.realtime_voice),
         realtime_rate=_env_int("REALTIME_RATE", DIRECT_DEFAULTS.realtime_rate),
     )

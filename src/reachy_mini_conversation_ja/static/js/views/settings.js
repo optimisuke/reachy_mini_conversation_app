@@ -109,6 +109,53 @@ function buildConnectionSection({ onSaved } = {}) {
     class: "settings-input",
   });
   const apiKeyHint = h("p", { class: "settings-hint" }, "");
+  const modelSelect = h("select", { class: "settings-select", name: "realtime_model" });
+  const modelHint = h("p", { class: "settings-hint" }, "");
+  const modelField = h(
+    "div",
+    { "data-role": "model-field" },
+    h(
+      "label",
+      { class: "settings-field" },
+      h("span", { class: "settings-label" }, "Realtime model"),
+      modelSelect
+    )
+  );
+  const timezoneInput = h("input", {
+    type: "text",
+    name: "timezone",
+    autocomplete: "off",
+    placeholder: "Asia/Tokyo",
+    class: "settings-input",
+  });
+  const locationInput = h("input", {
+    type: "text",
+    name: "location",
+    autocomplete: "off",
+    placeholder: "Kobe, Japan",
+    class: "settings-input",
+  });
+  const placeFields = h(
+    "div",
+    { class: "settings-field-row", "data-role": "place-fields" },
+    h(
+      "label",
+      { class: "settings-field" },
+      h("span", { class: "settings-label" }, "Timezone"),
+      timezoneInput
+    ),
+    h(
+      "label",
+      { class: "settings-field" },
+      h("span", { class: "settings-label" }, "Location"),
+      locationInput
+    )
+  );
+  const placeHint = h(
+    "p",
+    { class: "settings-hint" },
+    "Used for the time and weather tools. A city or prefecture resolves; a street address does not."
+  );
   const apiKeyField = h(
     "div",
     { class: "settings-field-row", "data-role": "api-key-field" },
@@ -141,6 +188,10 @@ function buildConnectionSection({ onSaved } = {}) {
     { class: "settings-form" },
     apiKeyField,
     apiKeyHint,
+    modelField,
+    modelHint,
+    placeFields,
+    placeHint,
     hfFields,
     h("div", { class: "settings-actions" }, submitButton),
     status
@@ -157,6 +208,7 @@ function buildConnectionSection({ onSaved } = {}) {
   // form does not flash a field the backend may not want.
   let needsApiKey = false;
   let hasSavedKey = false;
+  let modelChoices = [];
 
   function syncLocalFields() {
     const isLocal = hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
@@ -172,6 +224,15 @@ function buildConnectionSection({ onSaved } = {}) {
     // Only one backend's settings are ever relevant, so show only those.
     hfFields.style.display = needsApiKey ? "none" : "";
     apiKeyField.style.display = needsApiKey ? "" : "none";
+    modelField.style.display = needsApiKey ? "" : "none";
+    modelHint.style.display = needsApiKey ? "" : "none";
+    modelSelect.disabled = !needsApiKey;
+    placeFields.style.display = needsApiKey ? "" : "none";
+    placeHint.style.display = needsApiKey ? "" : "none";
+    timezoneInput.disabled = !needsApiKey;
+    locationInput.disabled = !needsApiKey;
+    const chosen = modelChoices.find((choice) => choice.id === modelSelect.value);
+    modelHint.textContent = chosen?.hint || "";
     apiKeyHint.style.display = needsApiKey ? "" : "none";
     apiKeyInput.disabled = !needsApiKey;
     // A saved key is never sent back here, so the box stays empty and asking for a
@@ -192,6 +253,9 @@ function buildConnectionSection({ onSaved } = {}) {
     hfHostInput.disabled = true;
     hfPortInput.disabled = true;
     apiKeyInput.disabled = true;
+    modelSelect.disabled = true;
+    timezoneInput.disabled = true;
+    locationInput.disabled = true;
     form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
     status.textContent = "Saving…";
@@ -200,6 +264,9 @@ function buildConnectionSection({ onSaved } = {}) {
       const payload = {};
       if (needsApiKey) {
         if (key) payload.api_key = key;
+        if (modelSelect.value) payload.realtime_model = modelSelect.value;
+        if (timezoneInput.value.trim()) payload.timezone = timezoneInput.value.trim();
+        if (locationInput.value.trim()) payload.location = locationInput.value.trim();
       } else {
         payload.hf_mode = hfModeSelect.value;
         if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
@@ -239,6 +306,16 @@ function buildConnectionSection({ onSaved } = {}) {
       needsApiKey =
         payload?.needs_api_key ?? OPENAI_BACKENDS.includes(payload?.backend);
       hasSavedKey = Boolean(payload?.has_key);
+      modelChoices = Array.isArray(payload?.realtime_model_choices)
+        ? payload.realtime_model_choices
+        : [];
+      modelSelect.replaceChildren(
+        ...modelChoices.map((choice) => h("option", { value: choice.id }, choice.id))
+      );
+      if (payload?.realtime_model) modelSelect.value = payload.realtime_model;
+      // Prefilled with what is in force, so saving without touching them changes nothing.
+      if (payload?.timezone) timezoneInput.value = payload.timezone;
+      if (payload?.location) locationInput.value = payload.location;
       syncApiKeyField();
       if (Object.values(HF_CONNECTION_MODES).includes(payload?.hf_connection_mode)) {
         hfModeSelect.value = payload.hf_connection_mode;

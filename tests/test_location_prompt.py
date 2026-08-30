@@ -6,23 +6,27 @@ from reachy_mini_conversation_ja import config
 from reachy_mini_conversation_ja.prompts import format_location_for_prompt
 
 
-def test_no_note_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unconfigured robot says nothing about where it is."""
+def test_the_shipped_defaults_are_described(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With nothing configured the robot still knows it is in Japan."""
     monkeypatch.delenv(config.LOCATION_TIMEZONE_ENV, raising=False)
     monkeypatch.delenv(config.LOCATION_PLACE_ENV, raising=False)
 
-    assert format_location_for_prompt() == ""
+    note = format_location_for_prompt()
+
+    assert config.LOCATION_DEFAULT_PLACE in note
+    assert config.LOCATION_DEFAULT_TIMEZONE in note
 
 
-def test_place_alone_covers_the_weather(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A place is enough to stop the weather tool asking which city."""
-    monkeypatch.delenv(config.LOCATION_TIMEZONE_ENV, raising=False)
-    monkeypatch.setenv(config.LOCATION_PLACE_ENV, "Kobe, Japan")
+def test_a_configured_place_replaces_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Someone elsewhere must be able to move the robot without editing the code."""
+    monkeypatch.setenv(config.LOCATION_TIMEZONE_ENV, "Europe/Paris")
+    monkeypatch.setenv(config.LOCATION_PLACE_ENV, "Paris, France")
 
     note = format_location_for_prompt()
 
-    assert "Kobe, Japan" in note
-    assert "timezone" not in note
+    assert "Paris, France" in note
+    assert "Europe/Paris" in note
+    assert config.LOCATION_DEFAULT_PLACE not in note
 
 
 def test_timezone_alone_covers_the_time_tool(monkeypatch: pytest.MonkeyPatch) -> None:

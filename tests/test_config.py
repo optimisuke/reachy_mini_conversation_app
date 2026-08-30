@@ -118,15 +118,15 @@ def test_vision_is_off_unless_asked_for(monkeypatch) -> None:
     assert config.get_direct_backend_settings().llm_vision is True
 
 
-def test_location_settings_are_unset_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nothing is claimed about where the robot is until it is configured."""
+def test_location_settings_ship_ready_for_japan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Japanese fork should answer the time and the weather before any setup."""
     monkeypatch.delenv(config.LOCATION_TIMEZONE_ENV, raising=False)
     monkeypatch.delenv(config.LOCATION_PLACE_ENV, raising=False)
 
     settings = config.get_location_settings()
 
-    assert settings.timezone is None
-    assert settings.place is None
+    assert settings.timezone == config.LOCATION_DEFAULT_TIMEZONE
+    assert settings.place == config.LOCATION_DEFAULT_PLACE
 
 
 def test_location_settings_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:

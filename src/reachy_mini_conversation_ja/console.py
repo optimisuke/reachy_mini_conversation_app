@@ -20,6 +20,9 @@ from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_ja.config import (
     LOCKED_PROFILE,
+    LOCATION_PLACE_ENV,
+    REALTIME_MODEL_ENV,
+    LOCATION_TIMEZONE_ENV,
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
@@ -28,15 +31,21 @@ from reachy_mini_conversation_ja.config import (
     get_default_voice,
     get_hf_session_url,
     set_custom_profile,
+    is_valid_place_name,
     get_available_voices,
     get_hf_direct_ws_url,
+    get_location_settings,
     build_hf_direct_ws_url,
     has_backend_credential,
     has_hf_realtime_target,
+    is_valid_timezone_name,
     parse_hf_direct_target,
     get_conversation_backend,
+    get_realtime_model_choices,
     backend_requires_openai_key,
+    get_direct_backend_settings,
     get_hf_connection_selection,
+    is_valid_realtime_model_name,
     refresh_runtime_config_from_env,
 )
 from reachy_mini_conversation_ja.prompts import get_session_voice, get_session_instructions
@@ -92,6 +101,8 @@ LOCAL_PLAYER_BACKEND = (
 )
 
 HandlerFactory = Callable[[Optional[str]], ConversationHandler]
+# Settings this app owns, as opposed to the Hugging Face connection it inherited.
+OWN_BACKEND_SETTINGS = frozenset({"api_key", "realtime_model", "timezone", "location"})
 
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
@@ -443,6 +454,25 @@ class LocalStream:
             raise JsonRpcError("API key required", reason="empty_key", code=-32602)
         self._persist_env_values({"OPENAI_API_KEY": key})
 
+    def _persist_realtime_model(self, raw_model: object) -> None:
+        """Validate and persist the realtime model name to the instance `.env`."""
+        self._persist_checked_value(
+            REALTIME_MODEL_ENV, raw_model, is_valid_realtime_model_name, "invalid_realtime_model"
+        )
+
+    def _persist_checked_value(
+        self,
+        env_name: str,
+        raw_value: object,
+        is_valid: Callable[[str], bool],
+        reason: str,
+    ) -> None:
+        """Persist one validated setting, refusing anything the app could not use."""
+        value = str(raw_value or "").strip()
+        if not is_valid(value):
+            raise JsonRpcError(f"invalid value for {env_name}", reason=reason, code=-32602)
+        self._persist_env_values({env_name: value})
+
     def _persist_hf_direct_connection(self, host: str, port: int) -> None:
         """Persist a direct Hugging Face websocket target."""
         self._persist_env_values(
@@ -576,9 +606,19 @@ class LocalStream:
             backend_connection = self._backend_connection_status()
             # The credential the *selected* backend needs, never the credential itself.
             configured = has_backend_credential()
+            realtime_model = get_direct_backend_settings().realtime_model
+            offered = [{"id": name, "hint": hint} for name, hint in get_realtime_model_choices()]
+            # A model set by hand belongs in the list too, or the page would misreport it.
+            if all(choice["id"] != realtime_model for choice in offered):
+                offered.insert(0, {"id": realtime_model, "hint": "設定ファイルで指定"})
+            location = get_location_settings()
             return {
                 "backend": get_conversation_backend(),
                 "needs_api_key": backend_requires_openai_key(),
+                "realtime_model": realtime_model,
+                "realtime_model_choices": offered,
+                "timezone": location.timezone,
+                "location": location.place,
                 "has_key": configured,
                 "has_hf_session_url": bool(hf_session_url),
                 "has_hf_ws_url": bool(hf_ws_url),
@@ -644,17 +684,26 @@ class LocalStream:
         def _rpc_backend_config(params: dict[str, object]) -> dict[str, object]:
             # An API key on its own is a complete request: the OpenAI backends need
             # nothing else, and touching the Hugging Face settings would be a surprise.
-            if "api_key" in params and "hf_mode" not in params:
-                self._persist_openai_api_key(params.get("api_key"))
-                if self._can_rebuild_handler():
-                    self._mark_restart_requested("api_key_changed")
-                    message = "Key saved. Reconnecting backend."
-                else:
-                    message = "Key saved. Restart Reachy Mini Conversation from the desktop app to apply it."
-                return {"ok": True, "message": message, **_status_payload()}
-
             if "api_key" in params:
                 self._persist_openai_api_key(params.get("api_key"))
+            if "realtime_model" in params:
+                self._persist_realtime_model(params.get("realtime_model"))
+            if "timezone" in params:
+                self._persist_checked_value(
+                    LOCATION_TIMEZONE_ENV, params.get("timezone"), is_valid_timezone_name, "invalid_timezone"
+                )
+            if "location" in params:
+                self._persist_checked_value(
+                    LOCATION_PLACE_ENV, params.get("location"), is_valid_place_name, "invalid_location"
+                )
+
+            if OWN_BACKEND_SETTINGS & params.keys() and "hf_mode" not in params:
+                if self._can_rebuild_handler():
+                    self._mark_restart_requested("backend_settings_changed")
+                    message = "Saved. Reconnecting backend."
+                else:
+                    message = "Saved. Restart Reachy Mini Conversation from the desktop app to apply it."
+                return {"ok": True, "message": message, **_status_payload()}
 
             hf_selection = get_hf_connection_selection()
             hf_mode = str(params.get("hf_mode") or hf_selection.mode).strip().lower()
