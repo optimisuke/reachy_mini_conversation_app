@@ -19,6 +19,11 @@ except ImportError as e:
     DANCE_AVAILABLE = False
 
 
+# The sibling play_emotion tool accepts "random" as a value, so models reach for it
+# here too. Take it rather than rejecting the move they asked for.
+RANDOM_MOVE = "random"
+
+
 def get_available_dances_and_descriptions() -> str:
     """Get formatted list of available dances with descriptions."""
     if not DANCE_AVAILABLE:
@@ -45,8 +50,8 @@ class Dance(Tool):
         "properties": {
             "move": {
                 "type": "string",
-                "enum": list(AVAILABLE_MOVES.keys() if DANCE_AVAILABLE else []),
-                "description": f"""Name of the moves and their descriptions; omit for random.
+                "enum": [*AVAILABLE_MOVES, RANDOM_MOVE] if DANCE_AVAILABLE else [],
+                "description": f"""Name of the move to play. Use {RANDOM_MOVE} if you have no preference.
                                 Here is a list of the available moves, you MUST only choose from these: \n
                                 {get_available_dances_and_descriptions()}
                                 """,
@@ -72,7 +77,7 @@ class Dance(Tool):
 
         logger.info("Tool call: dance move=%s repeat=%d", move_name, repeat)
 
-        if not move_name:
+        if not move_name or move_name == RANDOM_MOVE:
             move_name = random.choice(list(AVAILABLE_MOVES.keys()))
 
         if move_name not in AVAILABLE_MOVES:
