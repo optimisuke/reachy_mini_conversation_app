@@ -36,6 +36,9 @@ def _settings(**overrides: Any) -> DirectBackendSettings:
         "tts_sample_rate": 24000,
         "tts_voice": None,
         "llm_vision": False,
+        "realtime_model": "gpt-realtime-2.1-mini",
+        "realtime_voice": "marin",
+        "realtime_rate": 24000,
     }
     values.update(overrides)
     return DirectBackendSettings(**values)

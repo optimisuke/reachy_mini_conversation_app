@@ -103,7 +103,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | Variable | Description |
 |----------|-------------|
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Input transcription language. Defaults to `en`. The deployed realtime backend transcribes only the languages its server supports; the direct backend passes this to its own speech-to-text, so `ja` works there. |
-| `CONVERSATION_BACKEND` | Backend selector: `huggingface` for the realtime websocket backend, `direct` to run voice activity detection locally and call speech and language APIs directly. Defaults to `huggingface`. |
+| `CONVERSATION_BACKEND` | Backend selector: `huggingface` for the realtime websocket backend, `direct` to run voice activity detection locally and call speech and language APIs directly, `openai_realtime` for one round trip to OpenAI's realtime endpoint with detection still local. Defaults to `huggingface`. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
@@ -176,6 +176,21 @@ DIRECT_TTS_SAMPLE_RATE=24000
 The `camera` tool returns a picture, not a description, so set `DIRECT_LLM_VISION=1` when the language model can read images; with it off Reachy says it cannot see rather than inventing an answer.
 
 See `.env.example` for the full list, including the `DIRECT_VAD_*` thresholds that tune when speech starts, when a turn ends, and how loud an interruption must be while Reachy is talking.
+
+### Realtime backend
+
+The direct backend waits for transcription, then for an answer, then for synthesis. `CONVERSATION_BACKEND=openai_realtime` collapses those into one socket, and the server starts answering while the person is still talking. Measured against the real endpoint, first audio arrives about 1.1 s after the user stops speaking, against 2.6 s for the direct backend.
+
+```env
+CONVERSATION_BACKEND=openai_realtime
+OPENAI_API_KEY=sk-...
+REALTIME_TRANSCRIPTION_LANGUAGE=ja
+REACHY_MINI_CUSTOM_PROFILE=default_ja
+```
+
+Speech is still detected in the app, not by the server. Server-side detection requires streaming audio continuously, and audio input is billed per token, so a robot left running would pay to be listened to - about $0.36 an hour of silence. Detecting locally means nothing is sent until someone speaks, and the `DIRECT_VAD_*` thresholds keep working.
+
+Per turn this costs roughly what the direct backend does with `gpt-realtime-2.1-mini`, and about three times as much with the full model. Note that OpenAI documents the mini models as weaker at following instructions and calling tools, which matters here: this app offers the model a dozen or more.
 
 ## Running the app
 

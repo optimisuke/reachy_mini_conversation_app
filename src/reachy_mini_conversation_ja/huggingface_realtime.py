@@ -204,6 +204,16 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             tool_choice="auto",
         )
 
+    def _connect_kwargs(self) -> dict[str, Any]:
+        """Return the arguments that open the realtime socket for this provider."""
+        if self._realtime_connect_query:
+            return {"extra_query": self._realtime_connect_query}
+        return {}
+
+    def _decode_output_audio(self, delta: str) -> NDArray[np.int16]:
+        """Decode one base64 audio delta into samples at this handler's rate."""
+        return np.frombuffer(base64.b64decode(delta), dtype=np.int16)
+
     def _is_connected(self) -> bool:
         """Return whether the realtime connection is open."""
         return self.connection is not None
@@ -662,10 +672,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             "Tools to be used in conversation: %s",
             [tool["name"] for tool in tool_specs],
         )
-        connect_kwargs: dict[str, Any] = {}
-        if self._realtime_connect_query:
-            connect_kwargs["extra_query"] = self._realtime_connect_query
-        async with self.client.realtime.connect(**connect_kwargs) as conn:
+        async with self.client.realtime.connect(**self._connect_kwargs()) as conn:
             try:
                 session_config = self._get_session_config(tool_specs)
                 await conn.session.update(session=session_config)
@@ -799,8 +806,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
-                        decoded_pcm_bytes = base64.b64decode(event.delta)
-                        decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
+                        decoded_pcm = self._decode_output_audio(event.delta).reshape(1, -1)
                         self._mark_activity("assistant_audio_delta")
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()

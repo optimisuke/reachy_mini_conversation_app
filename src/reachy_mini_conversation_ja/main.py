@@ -88,6 +88,7 @@ def run(
     from reachy_mini_conversation_ja.moves import MovementManager
     from reachy_mini_conversation_ja.config import (
         DIRECT_BACKEND,
+        OPENAI_REALTIME_BACKEND,
         HF_LOCAL_CONNECTION_MODE,
         set_instance_path,
         get_conversation_backend,
@@ -122,8 +123,11 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
-    if get_conversation_backend() == DIRECT_BACKEND:
+    configured_backend = get_conversation_backend()
+    if configured_backend == DIRECT_BACKEND:
         logger.info("Configured direct conversation backend: local VAD with HTTP speech and language APIs")
+    elif configured_backend == OPENAI_REALTIME_BACKEND:
+        logger.info("Configured OpenAI realtime backend: local VAD, one round trip for the answer")
     else:
         logger.info(
             "Configured Hugging Face realtime backend, connection mode: %s",
@@ -171,11 +175,22 @@ def run(
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build the handler for the currently selected conversation backend."""
-        if get_conversation_backend() == DIRECT_BACKEND:
+        selected_backend = get_conversation_backend()
+        if selected_backend == DIRECT_BACKEND:
             from reachy_mini_conversation_ja.direct_cascade import DirectCascadeHandler
 
             logger.info("Using direct conversation handler (local VAD, then STT, LLM and TTS)")
             return DirectCascadeHandler(
+                deps,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+
+        if selected_backend == OPENAI_REALTIME_BACKEND:
+            from reachy_mini_conversation_ja.openai_realtime import OpenAIRealtimeHandler
+
+            logger.info("Using OpenAI realtime handler (local VAD, server answers in one round trip)")
+            return OpenAIRealtimeHandler(
                 deps,
                 instance_path=instance_path,
                 startup_voice=startup_voice,

@@ -74,6 +74,7 @@ HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-ur
 # transcribe (Japanese) become usable.
 CONVERSATION_BACKEND_ENV = "CONVERSATION_BACKEND"
 DIRECT_BACKEND = "direct"
+OPENAI_REALTIME_BACKEND = "openai_realtime"
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,11 @@ class DirectBackendDefaults:
     tts_model: str = "gpt-4o-mini-tts"
     # OpenAI streams /v1/audio/speech PCM at 24 kHz; other providers need an override.
     tts_sample_rate: int = 24000
+    # The realtime backend answers in one round trip instead of three. Mini keeps the
+    # audio tokens affordable; it follows instructions and calls tools less reliably.
+    realtime_model: str = "gpt-realtime-2.1-mini"
+    realtime_voice: str = "marin"
+    realtime_rate: int = 24000
 
 
 DIRECT_DEFAULTS = DirectBackendDefaults()
@@ -520,13 +526,12 @@ def get_conversation_backend() -> str:
     candidate = (os.getenv(CONVERSATION_BACKEND_ENV) or "").strip().lower()
     if not candidate:
         return HF_BACKEND
-    if candidate not in {HF_BACKEND, DIRECT_BACKEND}:
+    if candidate not in {HF_BACKEND, DIRECT_BACKEND, OPENAI_REALTIME_BACKEND}:
         logger.warning(
-            "Invalid %s=%r. Expected %s or %s.",
+            "Invalid %s=%r. Expected one of %s.",
             CONVERSATION_BACKEND_ENV,
             candidate,
-            HF_BACKEND,
-            DIRECT_BACKEND,
+            ", ".join(sorted({HF_BACKEND, DIRECT_BACKEND, OPENAI_REALTIME_BACKEND})),
         )
         return HF_BACKEND
     return candidate
@@ -549,6 +554,9 @@ class DirectBackendSettings:
     tts_sample_rate: int
     tts_voice: str | None
     llm_vision: bool
+    realtime_model: str
+    realtime_voice: str
+    realtime_rate: int
 
 
 def get_direct_backend_settings() -> DirectBackendSettings:
@@ -571,6 +579,9 @@ def get_direct_backend_settings() -> DirectBackendSettings:
         tts_voice=_optional_env_text("DIRECT_TTS_VOICE"),
         # Off by default because the default endpoint's model reads text only.
         llm_vision=_env_flag("DIRECT_LLM_VISION", default=False),
+        realtime_model=_env_text("REALTIME_MODEL", DIRECT_DEFAULTS.realtime_model),
+        realtime_voice=_env_text("REALTIME_VOICE", DIRECT_DEFAULTS.realtime_voice),
+        realtime_rate=_env_int("REALTIME_RATE", DIRECT_DEFAULTS.realtime_rate),
     )
 
 
