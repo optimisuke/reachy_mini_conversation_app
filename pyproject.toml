@@ -5,9 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reachy_mini_conversation_ja"
 version = "1.0.1"
-authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
+authors = [{ name = "optimisuke" }]
+# A fork of Pollen Robotics' conversation app, Apache-2.0. The attribution and the list
+# of changes live in the README, which ships with the package as its long description.
 description = "Talk with Reachy Mini in Japanese"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "huggingface-hub>=1.17.0",

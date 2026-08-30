@@ -1,25 +1,51 @@
 ---
-title: Reachy Mini Conversation App
-emoji: 🎤
-colorFrom: red
-colorTo: blue
+title: リーチーミニ 日本語会話
+emoji: 🗯️
+colorFrom: pink
+colorTo: indigo
 sdk: static
 pinned: false
-short_description: Talk with Reachy Mini!
+short_description: 日本語で話せる会話アプリ
 suggested_storage: large
 tags:
  - reachy_mini
  - reachy_mini_python_app
 ---
 
-# Reachy Mini conversation app
+# リーチーミニ 日本語会話 — Reachy Mini conversation app, in Japanese
 
-Conversational app for the Reachy Mini robot combining realtime voice, vision, personality-aware tools, and choreographed motion.
+Conversational app for the Reachy Mini robot combining realtime voice, vision, personality-aware tools, and choreographed motion — speaking Japanese.
+
+This is a fork of [pollen-robotics/reachy_mini_conversation_app](https://github.com/pollen-robotics/reachy_mini_conversation_app). See [What this fork changes](#what-this-fork-changes) for the differences.
 
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
+## What this fork changes
+
+The upstream app talks to a Hugging Face speech-to-speech server whose transcription
+does not cover Japanese: Japanese speech comes back as German. Everything downstream
+already worked, so the fork replaces the input side and leaves the rest alone.
+
+- **Two new backends.** `CONVERSATION_BACKEND=openai_realtime` detects speech in the
+  app and hands one round trip to OpenAI's realtime endpoint; `direct` calls
+  speech-to-text, a language model and text-to-speech separately. The upstream
+  Hugging Face backend is untouched and still the default.
+- **Local voice activity detection** (`voice_activity.py`), so the app decides when a
+  turn ends rather than the server. It ignores the microphone while Reachy talks,
+  which is what stopped the robot answering its own voice.
+- **A Japanese personality** in `profiles/default_ja/`. The bundled profiles are
+  unmodified.
+- **Where the robot stands** (`CONVERSATION_TIMEZONE`, `CONVERSATION_LOCATION`), because
+  the remote weather and time tools otherwise ask which city and answer in UTC.
+- **A renamed package** (`reachy_mini_conversation_ja`) so an upstream release cannot
+  overwrite this app, and both can be installed side by side.
+
+Measured on a Reachy Mini: a reply starts about 200 ms after the speaker stops, and a
+day of conversation cost about $0.56 in API usage.
+
 ## Table of contents
 
+- [What this fork changes](#what-this-fork-changes)
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
@@ -451,4 +477,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [`AGENTS
 
 ## License
 
-Apache 2.0
+Apache 2.0, as upstream.
+
+This is a modified fork of
+[pollen-robotics/reachy_mini_conversation_app](https://github.com/pollen-robotics/reachy_mini_conversation_app),
+Copyright Pollen Robotics, distributed under the Apache License 2.0. The changes made in
+this fork are listed under [What this fork changes](#what-this-fork-changes) and are
+distributed under the same licence.
