@@ -1,8 +1,8 @@
 ---
 title: リーチーミニ 日本語会話
 emoji: 🗯️
-colorFrom: pink
-colorTo: indigo
+colorFrom: yellow
+colorTo: gray
 sdk: static
 pinned: false
 short_description: 日本語で話せる会話アプリ
