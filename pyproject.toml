@@ -69,6 +69,14 @@ reachy_talk_data_ja = [
   "profiles/**/*.md",
 ]
 
+[tool.pytest.ini_options]
+# CI runs bare `pytest`, which without this walks the whole repo looking for
+# tests, so a local `pytest tests/` and a CI run do not collect the same set.
+testpaths = ["tests"]
+# A test that hangs used to sit silently until the job's 15-minute budget ran
+# out, leaving no output to debug. Dump every thread's stack instead.
+faulthandler_timeout = 90
+
 [tool.ruff]
 line-length = 119
 exclude = [".venv", "dist", "build", "**/__pycache__", "*.egg-info", ".mypy_cache", ".pytest_cache"]
