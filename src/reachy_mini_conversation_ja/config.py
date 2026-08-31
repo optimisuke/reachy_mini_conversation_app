@@ -669,16 +669,18 @@ class SpeechDetectionSettings:
 
     window_s: float = 0.02
     # An energy detector cannot tell a voice from a washing machine, so the levels and
-    # durations are set where household noise mostly falls below them.
-    min_level: float = 0.010
-    barge_in_min_level: float = 0.018
+    # durations are set where household noise mostly falls below them. They are set low
+    # enough to hear someone across the room; the adaptive noise floor is what keeps a
+    # noisy one from triggering, so the absolute minimum does not have to.
+    min_level: float = 0.005
+    barge_in_min_level: float = 0.012
     # The speaker sits next to the microphone, and on this robot Reachy's own voice
     # clears even six times the noise floor, so it gets transcribed and answered and
     # the conversation loops on itself. Ignoring the microphone while it talks costs
     # the ability to interrupt, which is the smaller loss. Set DIRECT_VAD_BARGE_IN=1
     # to trade back.
     barge_in_enabled: bool = False
-    speech_start_ratio: float = 3.5
+    speech_start_ratio: float = 2.5
     barge_in_ratio: float = 6.0
     speech_start_s: float = 0.15
     barge_in_start_s: float = 0.3
